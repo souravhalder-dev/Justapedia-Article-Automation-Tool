@@ -27,7 +27,7 @@ class BatchCreateArticles(BaseModel):
     category: Optional[str] = None
 
 class CategoryDiscoverRequest(BaseModel):
-    category_name: str
+    category_name: Optional[str] = None
     limit: int = 25
     mode: str = "category"  # "category" or "deceased"
     filter_incomplete_only: bool = True
