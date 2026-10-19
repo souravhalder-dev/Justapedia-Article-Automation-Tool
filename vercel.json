@@ -4,7 +4,11 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/*.py": {
-      "includeFiles": "backend/**",
+      "includeFiles": "{backend/**,frontend/dist/**}",
+      "maxDuration": 60
+    },
+    "backend/app/main.py": {
+      "includeFiles": "{backend/**,frontend/dist/**}",
       "maxDuration": 60
     }
   },

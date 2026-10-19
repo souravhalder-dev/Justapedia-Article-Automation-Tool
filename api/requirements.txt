@@ -9,5 +9,6 @@ mwparserfromhell>=0.6.6
 wikitextparser>=0.55.0
 sqlalchemy>=2.0.0
 aiosqlite>=0.20.0
+greenlet>=3.0.0
 python-dotenv>=1.0.0
 google-genai>=2.0.0

@@ -64,8 +64,15 @@ async def health_check():
 
 # Mount static frontend build if present
 frontend_dist = os.path.join(BASE_DIR.parent, "frontend", "dist")
+if not os.path.exists(frontend_dist):
+    alt_dist = os.path.join(os.getcwd(), "frontend", "dist")
+    if os.path.exists(alt_dist):
+        frontend_dist = alt_dist
+
 if os.path.exists(frontend_dist):
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+    assets_dir = os.path.join(frontend_dist, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
@@ -76,4 +83,7 @@ if os.path.exists(frontend_dist):
         file_path = os.path.join(frontend_dist, full_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
+        index_file = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        return {"status": "online", "app": settings.APP_NAME}
