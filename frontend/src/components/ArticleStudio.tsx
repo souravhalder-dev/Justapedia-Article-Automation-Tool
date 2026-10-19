@@ -35,8 +35,10 @@ export const ArticleStudio: React.FC<ArticleStudioProps> = ({
       const draft = article.user_edited_draft || article.generated_draft || article.original_wikitext || '';
       setEditorText(draft);
       setIsEditorDirty(false);
-      // Auto-switch to editor or preview if no diff exists yet
-      if (!article.generated_draft && !article.diff_json) {
+      // Auto-switch to diff when draft is ready, or sources if pending research
+      if (article.generated_draft || article.diff_json) {
+        setActiveTab('diff');
+      } else {
         setActiveTab('sources');
       }
     }

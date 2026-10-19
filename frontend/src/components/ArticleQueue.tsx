@@ -27,9 +27,16 @@ export const ArticleQueue: React.FC<ArticleQueueProps> = ({
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [hideDone, setHideDone] = useState<boolean>(true);
 
   // Filtering
   const filteredArticles = articles.filter(a => {
+    // If hiding done articles:
+    if (hideDone) {
+      if (a.status === 'saved') return false;
+      if (a.status === 'discovered' && (!a.audit_flags || a.audit_flags.length === 0)) return false;
+    }
+
     const matchesSearch = a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (a.category && a.category.toLowerCase().includes(searchQuery.toLowerCase()));
     
@@ -160,20 +167,26 @@ export const ArticleQueue: React.FC<ArticleQueueProps> = ({
       </div>
 
       {/* Select All Checkbox Bar */}
-      {filteredArticles.length > 0 && (
-        <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs text-slate-500">
-          <label className="flex items-center space-x-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={selectedIds.length > 0 && selectedIds.length === filteredArticles.length}
-              onChange={handleToggleSelectAll}
-              className="rounded text-sky-600 focus:ring-sky-500"
-            />
-            <span>Select All Visible</span>
-          </label>
-          <span>{selectedIds.length} selected</span>
-        </div>
-      )}
+      <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs text-slate-500">
+        <label className="flex items-center space-x-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filteredArticles.length > 0 && selectedIds.length > 0 && selectedIds.length === filteredArticles.length}
+            onChange={handleToggleSelectAll}
+            className="rounded text-sky-600 focus:ring-sky-500"
+          />
+          <span>Select All Visible ({selectedIds.length})</span>
+        </label>
+        <label className="flex items-center space-x-1.5 cursor-pointer text-slate-600 hover:text-slate-900">
+          <input
+            type="checkbox"
+            checked={hideDone}
+            onChange={(e) => setHideDone(e.target.checked)}
+            className="rounded text-sky-600 focus:ring-sky-500"
+          />
+          <span className="font-medium">Hide Completed</span>
+        </label>
+      </div>
 
       {/* Article List Scrollable Area */}
       <div className="flex-1 overflow-y-auto divide-y divide-slate-100">

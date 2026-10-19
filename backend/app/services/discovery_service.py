@@ -141,11 +141,18 @@ class DiscoveryService:
         priority = audit.get("priority", "medium")
         summary = audit.get("summary", "")
 
-        # If filtering for incomplete only and article has no issues
-        if filter_incomplete_only and len(flags) == 0 and exists:
+        # Check if article is already complete / already done
+        critical_gaps = {"non_existent_page", "contradictory_living_category", "missing_death_date", "no_citations", "short_stub"}
+        has_critical_gap = any(f in critical_gaps for f in flags)
+
+        # If filtering for incomplete only and article is already complete/has no critical gaps
+        if filter_incomplete_only and not has_critical_gap and exists:
             return None
 
         if existing_job:
+            # If article was already edited and saved/published, do not show it again
+            if existing_job.status == "saved":
+                return None
             # Update existing record
             existing_job.page_exists = exists
             existing_job.original_wikitext = wikitext

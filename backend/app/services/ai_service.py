@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import asyncio
 from typing import Dict, Any, List, Optional
 from ..config import settings
 
@@ -85,17 +86,20 @@ class AIService:
         
         from google import genai
         client = genai.Client(api_key=self.api_key)
-        
         model_name = settings.GEMINI_MODEL or "gemini-3.8-flash"
-        
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "temperature": 0.2,
-            }
-        )
+
+        def _call_gemini():
+            return client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                    "temperature": 0.2,
+                }
+            )
+
+        # Non-blocking thread call with strict 7s timeout to protect serverless performance
+        response = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=7.0)
         
         raw_text = response.text
         data = json.loads(raw_text)
