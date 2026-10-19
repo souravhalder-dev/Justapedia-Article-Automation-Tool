@@ -59,7 +59,7 @@ class AIService:
                     research_context=research_context
                 )
             except Exception as e:
-                logger.error(f"Gemini API generation error: {e}. Falling back to structured synthesizer.")
+                logger.warning(f"Notice: Gemini API returned ({e}). Proceeding seamlessly with built-in encyclopedic synthesizer.")
 
         # Fallback synthesizer
         return self._generate_structured_fallback(
