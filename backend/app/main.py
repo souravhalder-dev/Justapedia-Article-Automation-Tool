@@ -49,7 +49,6 @@ app.include_router(articles_router)
 app.include_router(settings_router)
 app.include_router(batch_router)
 
-@app.get("/")
 @app.get("/api")
 @app.get("/api/")
 @app.get("/api/health")
@@ -73,6 +72,13 @@ if os.path.exists(frontend_dist):
     assets_dir = os.path.join(frontend_dist, "assets")
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/")
+    async def serve_index():
+        index_file = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        return {"status": "online", "app": settings.APP_NAME}
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
