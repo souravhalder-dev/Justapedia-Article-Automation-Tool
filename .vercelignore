@@ -7,3 +7,4 @@ backend/justapedia_editorial.db
 shelley_duvall_*.txt
 node_modules/
 frontend/node_modules/
+.venv/
