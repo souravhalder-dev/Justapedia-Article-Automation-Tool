@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppSettings, WikiTestConnectionResponse } from '../types';
-import { Settings, Shield, Cpu, Key, Globe, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { Settings, Shield, Globe, CheckCircle2, AlertCircle, X } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -22,8 +22,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [apiUrl, setApiUrl] = useState<string>(settings?.justapedia_api_url || 'https://justapedia.org/api.php');
   const [botUsername, setBotUsername] = useState<string>(settings?.justapedia_bot_username || '');
   const [botPassword, setBotPassword] = useState<string>('');
-  const [geminiKey, setGeminiKey] = useState<string>('');
-  const [geminiModel, setGeminiModel] = useState<string>(settings?.gemini_model || 'gemini-2.5-flash');
   const [safeTestMode, setSafeTestMode] = useState<boolean>(settings?.safe_test_mode ?? false);
   const [sandboxTitle, setSandboxTitle] = useState<string>(settings?.sandbox_page_title || 'Justapedia:Sandbox');
 
@@ -76,17 +74,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const payload: Partial<AppSettings> = {
         justapedia_api_url: apiUrl,
         justapedia_bot_username: botUsername,
-        gemini_model: geminiModel,
         safe_test_mode: safeTestMode,
         sandbox_page_title: sandboxTitle
       };
       if (botPassword) payload.justapedia_bot_password_masked = botPassword; // Will be set on backend
-      if (geminiKey) payload.gemini_key_masked = geminiKey;
 
       await onUpdateSettings({
         ...payload,
-        ...(botPassword ? { justapedia_has_password: true } : {}),
-        ...(geminiKey ? { gemini_has_key: true } : {})
+        ...(botPassword ? { justapedia_has_password: true } : {})
       });
       setSaveMessage('Settings saved successfully!');
       setTimeout(() => setSaveMessage(null), 3000);
@@ -216,49 +211,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
           </div>
 
-          {/* Section 2: AI & LLM Engine */}
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center space-x-2 border-b border-slate-200 pb-1.5 text-xs font-bold text-slate-800 uppercase tracking-wide">
-              <Cpu className="w-4 h-4 text-indigo-600" />
-              <span>Google Gemini AI Engine</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Gemini API Key {settings?.gemini_has_key && '(Active Key Set)'}
-                </label>
-                <input
-                  type="password"
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
-                  placeholder={settings?.gemini_has_key ? '••••••••••••' : 'AIzaSy...'}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Gemini Model
-                </label>
-                <select
-                  value={geminiModel}
-                  onChange={(e) => setGeminiModel(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white"
-                >
-                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Latest & Recommended)</option>
-                  <option value="gemini-3.8-pro">Gemini 3.8 Pro (Deep Reasoning & Analysis)</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                </select>
-              </div>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              If left blank, the studio uses its built-in rule-based encyclopedia synthesizer with Wikidata and Wikipedia citation extracts.
-            </p>
-          </div>
-
-          {/* Section 3: Safe Test Mode & Sandbox */}
+          {/* Section 2: Safe Test Mode & Sandbox */}
           <div className="space-y-3 pt-2">
             <div className="flex items-center space-x-2 border-b border-slate-200 pb-1.5 text-xs font-bold text-slate-800 uppercase tracking-wide">
               <Shield className="w-4 h-4 text-amber-600" />
