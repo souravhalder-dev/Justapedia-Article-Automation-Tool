@@ -26,3 +26,5 @@ shelley_duvall_*.txt
 .idea/
 .DS_Store
 Thumbs.db
+
+.vercel

@@ -9,11 +9,14 @@ if os.environ.get("VERCEL") and "sqlite" in db_url:
     db_url = "sqlite+aiosqlite:////tmp/justapedia_editorial.db"
 
 # Ensure sqlite directory exists
-if db_url.startswith("sqlite+aiosqlite:///"):
-    db_path = db_url.replace("sqlite+aiosqlite:///", "")
-    dir_name = os.path.dirname(os.path.abspath(db_path))
-    if dir_name:
-        os.makedirs(dir_name, exist_ok=True)
+try:
+    if db_url.startswith("sqlite+aiosqlite:///"):
+        db_path = db_url.replace("sqlite+aiosqlite:///", "")
+        dir_name = os.path.dirname(os.path.abspath(db_path))
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+except Exception as e:
+    print(f"Notice: SQLite directory preparation: {e}")
 
 engine = create_async_engine(
     db_url,
@@ -39,5 +42,8 @@ async def get_db():
             await session.close()
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as e:
+        print(f"Notice: database init_db: {e}")

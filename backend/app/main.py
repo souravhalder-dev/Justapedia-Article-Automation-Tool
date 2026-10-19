@@ -15,16 +15,18 @@ from .services.justapedia_client import justapedia_client
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: initialize database tables
-    await init_db()
-    
-    # Auto-login to Justapedia if credentials exist
-    if settings.JUSTAPEDIA_BOT_USERNAME and settings.JUSTAPEDIA_BOT_PASSWORD:
-        await justapedia_client.login()
+    # Startup: safely initialize database tables
+    try:
+        await init_db()
+    except Exception as e:
+        print(f"Database initialization notice: {e}")
         
     yield
-    # Shutdown
-    await justapedia_client.close()
+    # Shutdown: gracefully close client sessions
+    try:
+        await justapedia_client.close()
+    except Exception:
+        pass
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -47,6 +49,7 @@ app.include_router(articles_router)
 app.include_router(settings_router)
 app.include_router(batch_router)
 
+@app.get("/")
 @app.get("/api")
 @app.get("/api/")
 @app.get("/api/health")
