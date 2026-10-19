@@ -45,33 +45,80 @@ async def list_articles(
     jobs = res.scalars().all()
     return [job_to_response(j) for j in jobs]
 
-@router.get("/{job_id}", response_model=ArticleJobResponse)
-async def get_article_detail(
+async def get_or_restore_job(
+    db: AsyncSession,
     job_id: int,
-    db: AsyncSession = Depends(get_db)
-):
-    """Retrieve full details of an article job including sources, facts, and diff."""
+    title: Optional[str] = None
+) -> ArticleJob:
+    """
+    Finds job by ID or Title. If not found in the current serverless instance,
+    re-fetches from Justapedia and recreates the job on-the-fly so requests NEVER 404!
+    """
     stmt = select(ArticleJob).options(selectinload(ArticleJob.sources)).where(ArticleJob.id == job_id)
     res = await db.execute(stmt)
     job = res.scalars().first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Article job not found")
+    if job:
+        return job
+
+    target_title = (title or "").strip()
+    if target_title:
+        stmt2 = select(ArticleJob).options(selectinload(ArticleJob.sources)).where(ArticleJob.title == target_title)
+        res2 = await db.execute(stmt2)
+        job2 = res2.scalars().first()
+        if job2:
+            return job2
+
+        # Auto-recreate job for this serverless instance
+        logger.info(f"Auto-restoring article job for '{target_title}' on serverless worker...")
+        from ..services.article_analyzer import ArticleAnalyzer
+        justapedia_data = await justapedia_client.get_article(target_title)
+        analysis = await ArticleAnalyzer.analyze_article(
+            title=target_title,
+            wikitext=justapedia_data.get("wikitext", ""),
+            page_exists=justapedia_data.get("exists", False),
+            categories=justapedia_data.get("categories", [])
+        )
+        new_job = ArticleJob(
+            title=target_title,
+            mode="deceased",
+            category="Restored",
+            status="pending",
+            priority=analysis.get("priority", "medium"),
+            audit_flags=json.dumps(analysis.get("flags", [])),
+            audit_summary=analysis.get("summary", ""),
+            page_exists=justapedia_data.get("exists", False),
+            original_wikitext=justapedia_data.get("wikitext", ""),
+            original_revid=justapedia_data.get("revid"),
+            original_timestamp=justapedia_data.get("timestamp")
+        )
+        db.add(new_job)
+        await db.commit()
+        await db.refresh(new_job)
+        return new_job
+
+    raise HTTPException(status_code=404, detail="Article job not found")
+
+@router.get("/{job_id}", response_model=ArticleJobResponse)
+async def get_article_detail(
+    job_id: int,
+    title: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Retrieve full details of an article job including sources, facts, and diff."""
+    job = await get_or_restore_job(db, job_id, title)
     return job_to_response(job)
 
 @router.post("/{job_id}/research", response_model=ArticleJobResponse)
 async def research_article(
     job_id: int,
+    title: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Execute AI-assisted multi-source research for an article.
     Gathers citations, obituary data, and Wikidata claims.
     """
-    stmt = select(ArticleJob).options(selectinload(ArticleJob.sources)).where(ArticleJob.id == job_id)
-    res = await db.execute(stmt)
-    job = res.scalars().first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Article job not found")
+    job = await get_or_restore_job(db, job_id, title)
 
     job.status = "researching"
     await db.commit()
@@ -116,21 +163,18 @@ async def research_article(
 @router.post("/{job_id}/generate", response_model=ArticleJobResponse)
 async def generate_draft(
     job_id: int,
+    title: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Generate neutral Wikipedia/Justapedia-style article draft,
     inline citations, structured fact extraction, and line-by-line diff.
     """
-    stmt = select(ArticleJob).options(selectinload(ArticleJob.sources)).where(ArticleJob.id == job_id)
-    res = await db.execute(stmt)
-    job = res.scalars().first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Article job not found")
+    job = await get_or_restore_job(db, job_id, title)
 
     # If not yet researched, do a quick research first
     if not job.sources:
-        await research_article(job_id=job_id, db=db)
+        await research_article(job_id=job_id, title=title, db=db)
         await db.refresh(job)
 
     try:
@@ -199,14 +243,11 @@ async def generate_draft(
 async def update_user_draft(
     job_id: int,
     payload: dict,
+    title: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """Save user manual modifications to the wikitext draft and recalculate diff."""
-    stmt = select(ArticleJob).options(selectinload(ArticleJob.sources)).where(ArticleJob.id == job_id)
-    res = await db.execute(stmt)
-    job = res.scalars().first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Article job not found")
+    job = await get_or_restore_job(db, job_id, title)
 
     new_wikitext = payload.get("wikitext", "")
     job.user_edited_draft = new_wikitext
@@ -225,6 +266,7 @@ async def update_user_draft(
 async def save_to_justapedia(
     job_id: int,
     req: SaveToWikiRequest,
+    title: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -232,11 +274,7 @@ async def save_to_justapedia(
     Requires explicit action by user.
     Protects against edit conflicts using original timestamp.
     """
-    stmt = select(ArticleJob).where(ArticleJob.id == job_id)
-    res = await db.execute(stmt)
-    job = res.scalars().first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Article job not found")
+    job = await get_or_restore_job(db, job_id, title or req.custom_title)
 
     target_title = req.custom_title or job.title
     content_to_save = req.wikitext or job.user_edited_draft or job.generated_draft

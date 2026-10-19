@@ -34,6 +34,13 @@ class JustapediaClient:
     async def test_connection(self) -> Dict[str, Any]:
         """Test API reachability, siteinfo, and user authentication state."""
         try:
+            # Auto-authenticate as bot if credentials exist and not yet logged in
+            if not self.logged_in_user and (settings.JUSTAPEDIA_BOT_USERNAME and settings.JUSTAPEDIA_BOT_PASSWORD):
+                try:
+                    await self.login()
+                except Exception as log_err:
+                    logger.warning(f"Auto-login during test_connection: {log_err}")
+
             params = {
                 "action": "query",
                 "meta": "siteinfo|userinfo",
@@ -135,6 +142,12 @@ class JustapediaClient:
 
     async def get_csrf_token(self, force_refresh: bool = False) -> str:
         """Fetch CSRF token for edit/write operations."""
+        if not self.logged_in_user and (settings.JUSTAPEDIA_BOT_USERNAME and settings.JUSTAPEDIA_BOT_PASSWORD):
+            try:
+                await self.login()
+            except Exception as e:
+                logger.warning(f"Auto-login during get_csrf_token: {e}")
+
         if self._csrf_token and not force_refresh:
             return self._csrf_token
 

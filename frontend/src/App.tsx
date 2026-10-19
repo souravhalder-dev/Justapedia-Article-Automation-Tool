@@ -28,9 +28,16 @@ export function App() {
       ]);
 
       if (artList.status === 'fulfilled') {
-        setArticles(artList.value);
-        if (artList.value.length > 0 && !selectedArticleId) {
-          setSelectedArticleId(artList.value[0].id);
+        let list = artList.value;
+        if (list.length === 0) {
+          const cached = localStorage.getItem('justapedia_queue');
+          if (cached) {
+            try { list = JSON.parse(cached); } catch {}
+          }
+        }
+        setArticles(list);
+        if (list.length > 0 && !selectedArticleId) {
+          setSelectedArticleId(list[0].id);
         }
       }
       if (currentSettings.status === 'fulfilled') {
@@ -55,8 +62,13 @@ export function App() {
   // Refresh single article in state
   const refreshArticle = async (id: number) => {
     try {
-      const updated = await api.getArticle(id);
-      setArticles(prev => prev.map(a => a.id === id ? updated : a));
+      const art = articles.find(a => a.id === id);
+      const updated = await api.getArticle(id, art?.title);
+      setArticles(prev => {
+        const next = prev.map(a => a.id === id ? updated : a);
+        localStorage.setItem('justapedia_queue', JSON.stringify(next));
+        return next;
+      });
     } catch (err) {
       console.error('Failed to refresh article', err);
     }
@@ -67,9 +79,12 @@ export function App() {
     setIsLoading(true);
     try {
       const newArticles = await api.discoverDeceased(category, limit, incompleteOnly);
-      await loadInitialData();
       if (newArticles.length > 0) {
+        setArticles(newArticles);
+        localStorage.setItem('justapedia_queue', JSON.stringify(newArticles));
         setSelectedArticleId(newArticles[0].id);
+      } else {
+        await loadInitialData();
       }
     } catch (err: any) {
       alert(`Discovery failed: ${err.message}`);
@@ -82,9 +97,12 @@ export function App() {
     setIsLoading(true);
     try {
       const newArticles = await api.discoverCategory(category, limit, incompleteOnly);
-      await loadInitialData();
       if (newArticles.length > 0) {
+        setArticles(newArticles);
+        localStorage.setItem('justapedia_queue', JSON.stringify(newArticles));
         setSelectedArticleId(newArticles[0].id);
+      } else {
+        await loadInitialData();
       }
     } catch (err: any) {
       alert(`Category scan failed: ${err.message}`);
@@ -97,9 +115,15 @@ export function App() {
     setIsLoading(true);
     try {
       const added = await api.addSpecificArticles(titles);
-      await loadInitialData();
       if (added.length > 0) {
+        setArticles(prev => {
+          const next = [...added, ...prev.filter(p => !added.some(a => a.id === p.id))];
+          localStorage.setItem('justapedia_queue', JSON.stringify(next));
+          return next;
+        });
         setSelectedArticleId(added[0].id);
+      } else {
+        await loadInitialData();
       }
     } catch (err: any) {
       alert(`Failed to add articles: ${err.message}`);
@@ -112,8 +136,13 @@ export function App() {
   const handleResearch = async (id: number) => {
     setIsLoading(true);
     try {
-      const updated = await api.researchArticle(id);
-      setArticles(prev => prev.map(a => a.id === id ? updated : a));
+      const art = articles.find(a => a.id === id);
+      const updated = await api.researchArticle(id, art?.title);
+      setArticles(prev => {
+        const next = prev.map(a => a.id === id ? updated : a);
+        localStorage.setItem('justapedia_queue', JSON.stringify(next));
+        return next;
+      });
     } catch (err: any) {
       alert(`Research failed: ${err.message}`);
     } finally {
@@ -124,8 +153,13 @@ export function App() {
   const handleGenerate = async (id: number) => {
     setIsLoading(true);
     try {
-      const updated = await api.generateDraft(id);
-      setArticles(prev => prev.map(a => a.id === id ? updated : a));
+      const art = articles.find(a => a.id === id);
+      const updated = await api.generateDraft(id, art?.title);
+      setArticles(prev => {
+        const next = prev.map(a => a.id === id ? updated : a);
+        localStorage.setItem('justapedia_queue', JSON.stringify(next));
+        return next;
+      });
     } catch (err: any) {
       alert(`Draft generation failed: ${err.message}`);
     } finally {
@@ -136,8 +170,13 @@ export function App() {
   const handleUpdateDraft = async (id: number, wikitext: string) => {
     setIsLoading(true);
     try {
-      const updated = await api.updateDraft(id, wikitext);
-      setArticles(prev => prev.map(a => a.id === id ? updated : a));
+      const art = articles.find(a => a.id === id);
+      const updated = await api.updateDraft(id, wikitext, art?.title);
+      setArticles(prev => {
+        const next = prev.map(a => a.id === id ? updated : a);
+        localStorage.setItem('justapedia_queue', JSON.stringify(next));
+        return next;
+      });
     } catch (err: any) {
       alert(`Failed to update draft: ${err.message}`);
     } finally {
@@ -156,7 +195,8 @@ export function App() {
     if (!selectedArticleId) throw new Error("No article selected");
     setIsLoading(true);
     try {
-      const res = await api.saveToJustapedia(selectedArticleId, options);
+      const art = articles.find(a => a.id === selectedArticleId);
+      const res = await api.saveToJustapedia(selectedArticleId, options, art?.title);
       await refreshArticle(selectedArticleId);
       return res;
     } finally {

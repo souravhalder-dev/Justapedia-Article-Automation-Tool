@@ -22,23 +22,27 @@ export const api = {
     return handleResponse<ArticleJob[]>(res);
   },
 
-  async getArticle(id: number): Promise<ArticleJob> {
-    const res = await fetch(`${BASE_URL}/api/articles/${id}`);
+  async getArticle(id: number, title?: string): Promise<ArticleJob> {
+    const q = title ? `?title=${encodeURIComponent(title)}` : '';
+    const res = await fetch(`${BASE_URL}/api/articles/${id}${q}`);
     return handleResponse<ArticleJob>(res);
   },
 
-  async researchArticle(id: number): Promise<ArticleJob> {
-    const res = await fetch(`${BASE_URL}/api/articles/${id}/research`, { method: 'POST' });
+  async researchArticle(id: number, title?: string): Promise<ArticleJob> {
+    const q = title ? `?title=${encodeURIComponent(title)}` : '';
+    const res = await fetch(`${BASE_URL}/api/articles/${id}/research${q}`, { method: 'POST' });
     return handleResponse<ArticleJob>(res);
   },
 
-  async generateDraft(id: number): Promise<ArticleJob> {
-    const res = await fetch(`${BASE_URL}/api/articles/${id}/generate`, { method: 'POST' });
+  async generateDraft(id: number, title?: string): Promise<ArticleJob> {
+    const q = title ? `?title=${encodeURIComponent(title)}` : '';
+    const res = await fetch(`${BASE_URL}/api/articles/${id}/generate${q}`, { method: 'POST' });
     return handleResponse<ArticleJob>(res);
   },
 
-  async updateDraft(id: number, wikitext: string): Promise<ArticleJob> {
-    const res = await fetch(`${BASE_URL}/api/articles/${id}/draft`, {
+  async updateDraft(id: number, wikitext: string, title?: string): Promise<ArticleJob> {
+    const q = title ? `?title=${encodeURIComponent(title)}` : '';
+    const res = await fetch(`${BASE_URL}/api/articles/${id}/draft${q}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ wikitext })
@@ -53,8 +57,9 @@ export const api = {
     is_minor?: boolean;
     is_bot?: boolean;
     use_sandbox?: boolean;
-  }): Promise<SaveToWikiResponse> {
-    const res = await fetch(`${BASE_URL}/api/articles/${id}/save`, {
+  }, title?: string): Promise<SaveToWikiResponse> {
+    const q = title ? `?title=${encodeURIComponent(title)}` : '';
+    const res = await fetch(`${BASE_URL}/api/articles/${id}/save${q}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options)
