@@ -72,10 +72,9 @@ async def get_or_restore_job(
         logger.info(f"Auto-restoring article job for '{target_title}' on serverless worker...")
         from ..services.article_analyzer import ArticleAnalyzer
         justapedia_data = await justapedia_client.get_article(target_title)
-        analysis = await ArticleAnalyzer.analyze_article(
+        analysis = ArticleAnalyzer.analyze(
             title=target_title,
             wikitext=justapedia_data.get("wikitext", ""),
-            page_exists=justapedia_data.get("exists", False),
             categories=justapedia_data.get("categories", [])
         )
         new_job = ArticleJob(
