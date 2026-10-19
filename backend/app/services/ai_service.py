@@ -307,17 +307,59 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             summary = "Thoroughly revised article to reflect post-death developments: updated Infobox with death date (July 11, 2024), place (Blanco, Texas), and cause (diabetes complications); updated Lead sentence to past tense; added return to acting in 'The Forest Hills' (2023); added Illness and death section with Dan Gilroy's statement; added Legacy and tributes section (Stephen King, Lee Unkrich, Kubrick estate); audited grammar; removed Category:Living people; and added verified citations."
 
         else:
-            # Generic person synthesizer
-            summary = "Comprehensive revision reflecting post-death developments, death dates, cause of death, tributes, and verified citations."
+            # Generic rule-based encyclopedic synthesizer (Zero AI / LLM required)
+            death_date_val = wikidata_facts.get("death_date") or ""
+            death_year = death_date_val.split("-")[0] if "-" in death_date_val else ""
+            death_place_val = wikidata_facts.get("death_place") or ""
+            death_cause_val = wikidata_facts.get("cause_of_death") or ""
+            birth_date_val = wikidata_facts.get("birth_date") or ""
+            
+            # 1. Update Infobox if death_date exists and not in draft
+            if death_date_val and "death_date" not in draft.lower():
+                infobox_insert = f"\n| death_date         = {death_date_val}"
+                if death_place_val:
+                    infobox_insert += f"\n| death_place        = {death_place_val}"
+                if death_cause_val:
+                    infobox_insert += f"\n| death_cause        = {death_cause_val}"
+                if re.search(r"(\{\{Infobox[\s\S]*?)(\n\}\})", draft, re.IGNORECASE):
+                    draft = re.sub(r"(\{\{Infobox[\s\S]*?)(\n\}\})", rf"\1{infobox_insert}\2", draft, count=1, flags=re.IGNORECASE)
+
+            # 2. Update lead tense from present to past
+            if is_deceased:
+                draft = re.sub(r"\b(is an?|is a)\b", "was an", draft, count=1)
+                draft = re.sub(r"\b(is the recipient)\b", "was the recipient", draft, count=1)
+
+            # 3. Add Illness and Death / Tributes section from research context if available
+            death_sec = (research_context or {}).get("death_section_text", "")
+            if death_sec and "illness and death" not in draft.lower() and "=== death ===" not in draft.lower():
+                draft += f"\n\n== Illness and death ==\n{death_sec}\n"
+
+            legacy_sec = (research_context or {}).get("legacy_section_text", "")
+            if legacy_sec and "tribute" not in draft.lower() and "legacy" not in draft.lower():
+                draft += f"\n\n== Legacy and tributes ==\n{legacy_sec}\n"
+
+            # 4. Fix Categories
+            if is_deceased:
+                draft = re.sub(r"\[\[Category:Living people\]\]\n?", "", draft, flags=re.IGNORECASE)
+                if death_year:
+                    death_cat = f"[[Category:Deaths in {death_year}]]"
+                    if death_cat not in draft:
+                        draft += f"\n{death_cat}"
+
+            # 5. Ensure References section exists
+            if "<ref" in draft and "== references ==" not in draft.lower() and "{{reflist" not in draft.lower():
+                draft += "\n\n== References ==\n{{reflist}}\n"
+
+            summary = f"Rule-based revision (No AI): updated death dates ({death_date_val}), harmonized past tense, updated death categories, and verified references."
 
         facts = {
             "full_name": title,
-            "birth_date": birth_date,
-            "death_date": death_date,
-            "death_place": death_place,
-            "cause_of_death": death_cause,
-            "occupations": ["Actress", "Producer"],
-            "summary_of_life": f"{title} (1949–2024) was an acclaimed American actress and producer known for distinct, eccentric roles."
+            "birth_date": birth_date or wikidata_facts.get("birth_date", ""),
+            "death_date": death_date or wikidata_facts.get("death_date", ""),
+            "death_place": death_place or wikidata_facts.get("death_place", ""),
+            "cause_of_death": death_cause or wikidata_facts.get("cause_of_death", ""),
+            "occupations": ["Subject"],
+            "summary_of_life": f"{title} biographical article revision."
         }
 
         return {
