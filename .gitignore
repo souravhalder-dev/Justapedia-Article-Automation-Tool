@@ -1,0 +1,28 @@
+# Environment variables (Sensitive)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+*.db
+backend/justapedia_editorial.db
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+
+# Test / Scratch files
+shelley_duvall_*.txt
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

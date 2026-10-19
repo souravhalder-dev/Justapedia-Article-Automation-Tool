@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/justapedia_editorial.db
+*.db
+shelley_duvall_*.txt
+node_modules/
+frontend/node_modules/

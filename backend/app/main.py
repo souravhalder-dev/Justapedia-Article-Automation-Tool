@@ -1,0 +1,76 @@
+import os
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+from .config import settings, BASE_DIR
+from .database import init_db
+from .api.routes_discovery import router as discovery_router
+from .api.routes_articles import router as articles_router
+from .api.routes_settings import router as settings_router
+from .api.routes_batch import router as batch_router
+from .services.justapedia_client import justapedia_client
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: initialize database tables
+    await init_db()
+    
+    # Auto-login to Justapedia if credentials exist
+    if settings.JUSTAPEDIA_BOT_USERNAME and settings.JUSTAPEDIA_BOT_PASSWORD:
+        await justapedia_client.login()
+        
+    yield
+    # Shutdown
+    await justapedia_client.close()
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    lifespan=lifespan
+)
+
+# Enable CORS for development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include API routes
+app.include_router(discovery_router)
+app.include_router(articles_router)
+app.include_router(settings_router)
+app.include_router(batch_router)
+
+@app.get("/api")
+@app.get("/api/")
+@app.get("/api/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "app": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "wiki_url": settings.JUSTAPEDIA_API_URL,
+        "safe_test_mode": settings.SAFE_TEST_MODE
+    }
+
+# Mount static frontend build if present
+frontend_dist = os.path.join(BASE_DIR.parent, "frontend", "dist")
+if os.path.exists(frontend_dist):
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        # Don't intercept API paths
+        if full_path.startswith("api"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="API route not found")
+        file_path = os.path.join(frontend_dist, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
