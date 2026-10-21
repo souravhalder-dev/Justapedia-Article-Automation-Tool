@@ -4,6 +4,7 @@ from app.services.ai_service import (
     format_wiki_birth_date,
     format_wiki_death_date,
     convert_infobox_dates_to_plain_text,
+    update_short_description,
     format_american_location,
     rewrite_article_prose,
     synthesize_original_death_section,
@@ -73,8 +74,8 @@ def test_rewrite_article_prose_converts_spelling_and_dates():
         death_date="2024-07-11"
     )
 
-    # Wikipedia maintenance templates must be removed
-    assert "{{short description" not in rewritten
+    # Wikipedia maintenance templates must be removed, but short description is updated
+    assert "{{short description|English actor (1945–2024)}}" in rewritten
     assert "{{use dmy dates" not in rewritten
 
     # Infobox dates must be converted to plain text American format (no templates)
@@ -180,11 +181,41 @@ def test_posthumous_developments_coverage():
     # Must cover death
     assert "died on May 10, 2024 in Boston, Massachusetts, U.S. at the age of 84." in section
     # Must cover memorial/funeral developments
-    assert "memorial services and commemorative gatherings were held" in section
+    assert "memorial services and funeral gatherings were conducted" in section
     # Must cover posthumous developments
     assert "== Posthumous developments ==" in section
     # Must have reliable inline citations
     assert "<ref>{{cite web |url=https://example.com/memorial" in section
+
+def test_update_short_description_preserves_and_updates():
+    raw_1 = "{{short description|American actress}}\n{{Infobox person\n}}"
+    up_1 = update_short_description(raw_1, "Shelley Duvall", "1949-07-07", "2024-07-11")
+    assert "{{short description|American actress (1949–2024)}}" in up_1
+
+    raw_2 = "{{short description|American actress (born 1949)}}\n{{Infobox person\n}}"
+    up_2 = update_short_description(raw_2, "Shelley Duvall", "1949-07-07", "2024-07-11")
+    assert "{{short description|American actress (1949–2024)}}" in up_2
+
+    raw_3 = "{{Infobox person\n}}"
+    up_3 = update_short_description(raw_3, "Jane", "1950-01-01", "2023-12-01", default_role="American novelist")
+    assert "{{short description|American novelist (1950–2023)}}" in up_3
+
+def test_citations_placed_before_content():
+    sources = [
+        {"url": "https://example.com/nyt-obit", "title": "Obituary", "publisher": "The New York Times"},
+        {"url": "https://example.com/reuters", "title": "Cause Report", "publisher": "Reuters"}
+    ]
+    section = synthesize_original_death_section(
+        title="John Smith",
+        death_date_raw="2024-08-01",
+        death_place_str="Chicago, Illinois, U.S.",
+        death_cause_str="heart failure",
+        birth_date_raw="1944-01-15",
+        sources=sources
+    )
+    # Citations must appear before or alongside the facts with attribution
+    assert "According to verified coverage in The New York Times,<ref>{{cite web |url=https://example.com/nyt-obit" in section
+    assert "As confirmed by official reports,<ref>{{cite web |url=https://example.com/reuters" in section
 
 @pytest.mark.asyncio
 async def test_fallback_synthesizer_generates_infobox_with_american_conventions():
@@ -256,7 +287,7 @@ async def test_original_wording_synthesis_no_verbatim_copy():
     # 2. Content must be synthesized in original wording with facts preserved
     assert "== Illness and death ==" in draft
     assert "died on March 15, 2024 in Austin, Texas, U.S. at the age of 83." in draft
-    assert "cause of death was cardiac arrest" in draft
+    assert "cause of death was attributed to cardiac arrest" in draft
     
-    # 3. Reliable inline citation must be attached
-    assert "<ref>{{cite web |url=https://example.com/pendelton-obit" in draft
+    # 3. Reliable inline citation must be attached before/alongside the factual statement
+    assert "According to verified coverage in The Washington Post,<ref>{{cite web |url=https://example.com/pendelton-obit" in draft

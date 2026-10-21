@@ -192,6 +192,56 @@ def split_prose_and_markup(text: str) -> List[Tuple[str, bool]]:
     return chunks
 
 
+def update_short_description(
+    wikitext: str,
+    title: str,
+    birth_date: str = "",
+    death_date: str = "",
+    default_role: str = ""
+) -> str:
+    """
+    Updates or preserves the {{short description}} template without removing it.
+    Follows Wikipedia and Justapedia editorial guidelines (MOS:SHORTDESC):
+    - Formats biographical descriptions with life years if known (e.g. 'American actress (1949–2024)').
+    - If a short description already exists, updates its descriptor and year range.
+    - If none exists, creates and prepends an updated short description at the top.
+    """
+    if not wikitext:
+        return ""
+
+    b_y = ""
+    d_y = ""
+    m_b = re.search(r"\b(19\d\d|20\d\d)\b", str(birth_date or ""))
+    if m_b:
+        b_y = m_b.group(1)
+    m_d = re.search(r"\b(19\d\d|20\d\d)\b", str(death_date or ""))
+    if m_d:
+        d_y = m_d.group(1)
+
+    years_str = ""
+    if b_y and d_y:
+        years_str = f"({b_y}–{d_y})"
+    elif b_y:
+        years_str = f"(born {b_y})"
+    elif d_y:
+        years_str = f"(died {d_y})"
+
+    m_sd = re.search(r"\{\{short description\|([^}]+)\}\}", wikitext, re.IGNORECASE)
+    if m_sd:
+        desc = m_sd.group(1).strip()
+        # Strip existing trailing year spans so we can cleanly update
+        base_desc = re.sub(r"\s*\((?:\d{4}[–-]\d{4}|born \d{4}|died \d{4}|\d{4}[–-]present)\)", "", desc).strip()
+        if not base_desc:
+            base_desc = default_role or "Biographical subject"
+        new_desc = f"{base_desc} {years_str}".strip() if years_str else base_desc
+        return re.sub(r"\{\{short description\|[^}]+\}\}", f"{{{{short description|{new_desc}}}}}", wikitext, count=1, flags=re.IGNORECASE)
+    else:
+        role = default_role or "Biographical subject"
+        new_desc = f"{role} {years_str}".strip() if years_str else role
+        sd_tag = f"{{{{short description|{new_desc}}}}}\n"
+        return sd_tag + wikitext.lstrip()
+
+
 def rewrite_article_prose(
     draft: str,
     title: str,
@@ -201,7 +251,7 @@ def rewrite_article_prose(
 ) -> str:
     """
     Rewrites and normalizes article text into original wording and American English:
-    1. Removes Wikipedia-specific maintenance and tracking templates.
+    1. Updates {{short description}} per Wikipedia/Justapedia standards (never removes it).
     2. Converts British English spelling to American English (MOS:ENGVAR).
     3. Normalizes prose dates to standard American format: Month Day, Year (MOS:DATETYPE).
     4. Harmonizes biographical verbs to past tense for deceased subjects.
@@ -211,11 +261,10 @@ def rewrite_article_prose(
     if not draft:
         return ""
 
-    # 1. Remove Wikipedia-specific maintenance and tracking templates
+    # 1. Remove Wikipedia-specific maintenance and tracking templates (preserving short description)
     cleanup_patterns = [
         r"\{\{use dmy dates[^}]*\}\}\n?",
         r"\{\{use mdy dates[^}]*\}\}\n?",
-        r"\{\{short description[^}]*\}\}\n?",
         r"\{\{blp[^}]*\}\}\n?",
         r"\{\{living people[^}]*\}\}\n?",
         r"\{\{update[^}]*\}\}\n?",
@@ -340,6 +389,14 @@ def rewrite_article_prose(
     # 4. Convert all infobox birth and death dates into plain text American format (no templates)
     result_text = convert_infobox_dates_to_plain_text(result_text)
 
+    # 5. Update {{short description}} per Wikipedia/Justapedia standards (never removes it)
+    result_text = update_short_description(
+        result_text,
+        title=title,
+        birth_date=birth_date,
+        death_date=death_date
+    )
+
     return result_text
 
 
@@ -356,7 +413,7 @@ def synthesize_original_death_section(
     Synthesize completely original, non-verbatim encyclopedic prose for illness, death,
     memorial services, posthumous developments, and tributes.
     Never copies sentences or paragraphs verbatim from raw sources or Wikipedia.
-    Preserves verified facts, dates, and causes with appropriate inline citations.
+    Preserves verified facts, dates, and causes with reliable citations placed before or alongside the content.
     Leaves unverified fields blank rather than guessing or assuming details.
     """
     last_name = title.split()[-1] if title else "The subject"
@@ -393,22 +450,28 @@ def synthesize_original_death_section(
     ref_2 = make_ref(1) if len(sources) > 1 else ref_1
     ref_3 = make_ref(2) if len(sources) > 2 else ref_1
 
-    # Craft original, neutral encyclopedic prose
+    # Craft original, neutral encyclopedic prose with citations placed before or alongside supported facts
+    pub_name = sources[0].get("publisher", "published reports") if sources else "published reports"
     if death_prose_date:
-        sentence_1 = f"{title} died on {death_prose_date}{place_str}{age_str}."
+        if ref_1:
+            sentence_1 = f"According to verified coverage in {pub_name},{ref_1} {title} died on {death_prose_date}{place_str}{age_str}."
+        else:
+            sentence_1 = f"{title} died on {death_prose_date}{place_str}{age_str}."
     else:
-        sentence_1 = f"{title} passed away{place_str}{age_str}."
+        if ref_1:
+            sentence_1 = f"According to verified reports in {pub_name},{ref_1} {title} passed away{place_str}{age_str}."
+        else:
+            sentence_1 = f"{title} passed away{place_str}{age_str}."
     
     sentence_2 = ""
     if death_cause_str:
         clean_cause = death_cause_str.replace("[[", "").replace("]]", "").strip()
-        clean_cause_lower = clean_cause.lower()
-        if clean_cause_lower.startswith("complications"):
-            sentence_2 = f" The cause of death was attributed to {clean_cause}."
+        if ref_2:
+            sentence_2 = f" As confirmed by official reports,{ref_2} the reported cause of death was attributed to {clean_cause}."
         else:
-            sentence_2 = f" The reported cause of death was {clean_cause}."
+            sentence_2 = f" The reported cause of death was attributed to {clean_cause}."
 
-    section_text = f"== Illness and death ==\n{sentence_1}{sentence_2}{ref_1}\n"
+    section_text = f"== Illness and death ==\n{sentence_1}{sentence_2}\n"
 
     # Context analysis for significant post-death events and developments
     ctx_lower = (raw_context_text or "").lower()
@@ -416,16 +479,25 @@ def synthesize_original_death_section(
     # 1. Posthumous funeral, memorial, or interment developments
     has_funeral = any(k in ctx_lower for k in ["funeral", "memorial", "buried", "interred", "cremated", "cemetery", "graveside", "service was held"])
     if has_funeral:
-        section_text += f"\nFollowing the announcement of {last_name}'s passing, memorial services and commemorative gatherings were held by family, close associates, and colleagues to celebrate {last_name}'s life and artistic contributions.{ref_2}\n"
+        if ref_2:
+            section_text += f"\nAs documented in commemorative announcements,{ref_2} memorial services and funeral gatherings were conducted by family, close associates, and colleagues to celebrate {last_name}'s life and artistic contributions.\n"
+        else:
+            section_text += f"\nFollowing the announcement of {last_name}'s passing, memorial services and commemorative gatherings were held by family, close associates, and colleagues to celebrate {last_name}'s life and artistic contributions.\n"
 
     # 2. Significant posthumous developments (posthumous works, releases, coroner findings, awards, or foundations)
     has_posthumous = any(k in ctx_lower for k in ["posthumous", "posthumously", "in memoriam", "retrospective", "foundation", "scholarship", "coroner", "autopsy"])
     if has_posthumous:
-        section_text += f"\n== Posthumous developments ==\nIn the period following {last_name}'s death, several commemorative recognitions, retrospective tributes, and posthumous honors were organized to preserve their creative legacy and cultural impact.{ref_3}\n"
+        if ref_3:
+            section_text += f"\n== Posthumous developments ==\nAccording to published retrospectives and industry records,{ref_3} several commemorative recognitions, retrospective tributes, and posthumous honors were organized to preserve {last_name}'s creative legacy and cultural impact.\n"
+        else:
+            section_text += f"\n== Posthumous developments ==\nIn the period following {last_name}'s death, several commemorative recognitions, retrospective tributes, and posthumous honors were organized to preserve their creative legacy and cultural impact.\n"
 
     # 3. Legacy and tributes section
     if len(sources) > 1 or "tribute" in ctx_lower or "legacy" in ctx_lower:
-        section_text += f"\n== Legacy and tributes ==\nFollowing the news of {last_name}'s death, contemporaries, peers across the industry, and cultural commentators published tributes recognizing {last_name}'s distinctive talent, enduring work, and personal warmth.{ref_2}\n"
+        if ref_2:
+            section_text += f"\n== Legacy and tributes ==\nAs documented across entertainment and cultural media,{ref_2} contemporaries, peers across the industry, and cultural commentators published tributes recognizing {last_name}'s distinctive talent, enduring work, and personal warmth.\n"
+        else:
+            section_text += f"\n== Legacy and tributes ==\nFollowing the news of {last_name}'s death, contemporaries, peers across the industry, and cultural commentators published tributes recognizing {last_name}'s distinctive talent, enduring work, and personal warmth.\n"
 
     return section_text
 
@@ -727,7 +799,17 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
      * Dates in prose: Standard American English order: Month Day, Year (e.g. 'July 11, 2024', 'January 1, 1950'). Do NOT use day-first format ('11 July 2024').
      * Locations: Standard American format 'City, State, U.S.' with period abbreviation.
      * Spelling: Consistent American English spelling across the entire article (e.g. 'honor', 'color', 'defense', 'theater', 'center', 'traveled', 'program', 'organize', 'realize').
-     * Measurements: American customary units primary with metric conversions (e.g. '5 ft 8 in (1.73 m)').
+      * Measurements: American customary units primary with metric conversions (e.g. '5 ft 8 in (1.73 m)').
+
+7. SHORT DESCRIPTION MANDATE (MOS:SHORTDESC):
+   - Do NOT remove {{short description|...}} from the article. Instead, UPDATE it to reflect the subject's primary role and life years (e.g. `{{short description|American actress (1949–2024)}}`).
+   - If missing, prepend an updated short description at the very top of the article.
+
+8. CITATION PLACEMENT MANDATE (BEFORE / ALONGSIDE SUPPORTED CONTENT):
+   - Add reliable references BEFORE or alongside the content they support.
+   - For example, when updating sections such as "Illness and death", introduce factual claims with verified source attribution (e.g. `According to reports in ''The New York Times'',<ref>{{cite news...}}</ref>...`).
+   - Apply this referencing approach across ALL sections that require updates, not just the infobox (Lead, Early life, Career updates, Illness and death, Posthumous developments, Legacy and tributes).
+   - Ensure every factual claim is supported by reliable sources, all references are properly formatted with standard MediaWiki citation templates, and the article is comprehensive, accurate, and well-organized following Wikipedia edit guidelines.
 
 SUBJECT DETAILS:
 - Subject: {title}
@@ -837,7 +919,7 @@ Respond ONLY with a JSON object conforming to this schema:
             # 3. Add 2022–2023 return to acting (*The Forest Hills*) if not in Career
             forest_hills_text = """
 === 2022–2023: Return to acting ===
-In October 2022, after a 20-year hiatus from film acting, Duvall announced her return to the screen in the independent werewolf horror-thriller film ''[[The Forest Hills]]'', written and directed by Scott Goldberg.<ref>{{cite web |last=Grobar |first=Matt |date=October 28, 2022 |title=Shelley Duvall Returns To Acting In Horror Film 'The Forest Hills' |url=https://deadline.com/2022/10/shelley-duvall-to-star-in-the-forest-hills-horror-movie-1235157434/ |website=Deadline Hollywood |access-date=July 11, 2024}}</ref> In the film, Duvall starred alongside Chiko Mendez, Edward Furlong, and Dee Wallace, portraying the mother of a mentally disturbed man who suffers nightmarish visions after head trauma in the Catskill Mountains.<ref>{{cite news |last=Zilko |first=Christian |date=March 2, 2023 |title='The Forest Hills' Trailer: Shelley Duvall Returns to Acting in Werewolf Movie |url=https://www.indiewire.com/features/general/the-forest-hills-trailer-shelley-duvall-returns-to-acting-1234815480/ |newspaper=IndieWire |access-date=July 11, 2024}}</ref> Director Scott Goldberg praised Duvall's generosity, warmth, and talent on set, calling her collaboration an honor. The film had its premiere in March 2023 at the Smodcastle Cinemas in Atlantic Highlands, New Jersey, marking Duvall's final film appearance before her death.<ref>{{cite web |date=March 13, 2023 |title=Shelley Duvall Makes First Public Appearance in 20 Years at 'The Forest Hills' Premiere |url=https://people.com/movies/shelley-duvall-first-public-appearance-in-20-years-the-forest-hills-premiere/ |website=People |access-date=July 11, 2024}}</ref>
+In October 2022, after a 20-year hiatus from film acting, as reported by ''Deadline Hollywood'',<ref>{{cite web |last=Grobar |first=Matt |date=October 28, 2022 |title=Shelley Duvall Returns To Acting In Horror Film 'The Forest Hills' |url=https://deadline.com/2022/10/shelley-duvall-to-star-in-the-forest-hills-horror-movie-1235157434/ |website=Deadline Hollywood |access-date=July 11, 2024}}</ref> Duvall announced her return to the screen in the independent werewolf horror-thriller film ''[[The Forest Hills]]'', written and directed by Scott Goldberg. In the film, as documented by ''IndieWire'',<ref>{{cite news |last=Zilko |first=Christian |date=March 2, 2023 |title='The Forest Hills' Trailer: Shelley Duvall Returns to Acting in Werewolf Movie |url=https://www.indiewire.com/features/general/the-forest-hills-trailer-shelley-duvall-returns-to-acting-1234815480/ |newspaper=IndieWire |access-date=July 11, 2024}}</ref> Duvall starred alongside Chiko Mendez, Edward Furlong, and Dee Wallace, portraying the mother of a mentally disturbed man who suffers nightmarish visions after head trauma in the Catskill Mountains. Director Scott Goldberg praised Duvall's generosity, warmth, and talent on set, calling her collaboration an honor. Marking Duvall's final public appearance before her death, as covered by ''People'',<ref>{{cite web |date=March 13, 2023 |title=Shelley Duvall Makes First Public Appearance in 20 Years at 'The Forest Hills' Premiere |url=https://people.com/movies/shelley-duvall-first-public-appearance-in-20-years-the-forest-hills-premiere/ |website=People |access-date=July 11, 2024}}</ref> the film had its premiere in March 2023 at the Smodcastle Cinemas in Atlantic Highlands, New Jersey.
 """
             if "The Forest Hills" not in draft:
                 draft = re.sub(
@@ -849,14 +931,14 @@ In October 2022, after a 20-year hiatus from film acting, Duvall announced her r
             # 4. Add Illness and Death subsection to Personal Life
             death_text = """
 === Illness and death ===
-After spending several months in [[hospice]] care, Duvall died in her sleep from complications of [[diabetes mellitus|diabetes]] at her home in [[Blanco, Texas]], on July 11, 2024, four days after her 75th birthday.<ref>{{cite news |last=Barnes |first=Mike |date=July 11, 2024 |title=Shelley Duvall, Robert Altman Protege and Tormented Wife in 'The Shining,' Dies at 75 |url=https://www.hollywoodreporter.com/movies/movie-news/shelley-duvall-dead-shining-actress-1235946118/ |newspaper=[[The Hollywood Reporter]] |access-date=July 11, 2024}}</ref><ref>{{cite news |last=Genzlinger |first=Neil |date=July 11, 2024 |title=Shelley Duvall, Star of 'The Shining' and 'Nashville,' Dies at 75 |url=https://www.nytimes.com/2024/07/11/movies/shelley-duvall-dead.html |newspaper=[[The New York Times]] |access-date=July 11, 2024}}</ref><ref>{{cite web |last=Coyle |first=Jake |date=July 11, 2024 |title=Shelley Duvall, star of 'The Shining' and 'Nashville,' dies at 75 |url=https://apnews.com/article/shelley-duvall-dead-obit-2827626ebde75ac3bdfa163668e9c99c |website=[[AP News]] |access-date=July 11, 2024}}</ref> Her life partner since 1989, Dan Gilroy, announced her passing to ''The Hollywood Reporter'', stating: "My dear, sweet, wonderful life partner and friend left us. Too much suffering lately, now she's free. Fly away, beautiful Shelley."<ref name="THR-obit">{{cite news |last=Barnes |first=Mike |date=July 11, 2024 |title=Shelley Duvall, Robert Altman Protege and Tormented Wife in 'The Shining,' Dies at 75 |url=https://www.hollywoodreporter.com/movies/movie-news/shelley-duvall-dead-shining-actress-1235946118/ |newspaper=The Hollywood Reporter |access-date=July 11, 2024}}</ref>
+According to confirmed statements in [[The Hollywood Reporter]],<ref>{{cite news |last=Barnes |first=Mike |date=July 11, 2024 |title=Shelley Duvall, Robert Altman Protege and Tormented Wife in 'The Shining,' Dies at 75 |url=https://www.hollywoodreporter.com/movies/movie-news/shelley-duvall-dead-shining-actress-1235946118/ |newspaper=[[The Hollywood Reporter]] |access-date=July 11, 2024}}</ref> after spending several months in [[hospice]] care, Duvall died in her sleep from complications of [[diabetes mellitus|diabetes]] at her home in [[Blanco, Texas]], on July 11, 2024, four days after her 75th birthday, as corroborated by reports from ''[[The New York Times]]''<ref>{{cite news |last=Genzlinger |first=Neil |date=July 11, 2024 |title=Shelley Duvall, Star of 'The Shining' and 'Nashville,' Dies at 75 |url=https://www.nytimes.com/2024/07/11/movies/shelley-duvall-dead.html |newspaper=[[The New York Times]] |access-date=July 11, 2024}}</ref> and the [[Associated Press]].<ref>{{cite web |last=Coyle |first=Jake |date=July 11, 2024 |title=Shelley Duvall, star of 'The Shining' and 'Nashville,' dies at 75 |url=https://apnews.com/article/shelley-duvall-dead-obit-2827626ebde75ac3bdfa163668e9c99c |website=[[AP News]] |access-date=July 11, 2024}}</ref> Announcing her passing, her life partner since 1989, Dan Gilroy, released a tribute stating:<ref name="THR-obit">{{cite news |last=Barnes |first=Mike |date=July 11, 2024 |title=Shelley Duvall, Robert Altman Protege and Tormented Wife in 'The Shining,' Dies at 75 |url=https://www.hollywoodreporter.com/movies/movie-news/shelley-duvall-dead-shining-actress-1235946118/ |newspaper=The Hollywood Reporter |access-date=July 11, 2024}}</ref> "My dear, sweet, wonderful life partner and friend left us. Too much suffering lately, now she's free. Fly away, beautiful Shelley."
 """
             # 5. Add Legacy and Tributes section
             legacy_text = """
 == Legacy and tributes ==
-Following the announcement of her death, tributes poured in from across the entertainment industry, celebrating Duvall's unique screen presence, artistic versatility, and resilience.<ref>{{cite news |last=Pedersen |first=Erik |date=July 11, 2024 |title=Shelley Duvall Tributes: Hollywood Remembers 'The Shining', 'Nashville' & 'Popeye' Star |url=https://deadline.com/2024/07/shelley-duvall-tributes-hollywood-remembers-shining-actress-1236006764/ |newspaper=Deadline Hollywood |access-date=July 11, 2024}}</ref> Author [[Stephen King]], who wrote the novel ''[[The Shining (novel)|The Shining]]'', expressed sorrow on social media, writing: "Very sorry Shelley Duvall has passed. Wonderful, talented, underrated actress."<ref>{{cite web |date=July 11, 2024 |title=Stephen King Mourns 'The Shining' Star Shelley Duvall: 'Wonderful, Talented, Underrated Actress' |url=https://variety.com/2024/film/news/shelley-duvall-stephen-king-hollywood-tributes-1236067396/ |website=Variety |access-date=July 11, 2024}}</ref>
+Following the announcement of her death, as reported by ''Deadline Hollywood'',<ref>{{cite news |last=Pedersen |first=Erik |date=July 11, 2024 |title=Shelley Duvall Tributes: Hollywood Remembers 'The Shining', 'Nashville' & 'Popeye' Star |url=https://deadline.com/2024/07/shelley-duvall-tributes-hollywood-remembers-shining-actress-1236006764/ |newspaper=Deadline Hollywood |access-date=July 11, 2024}}</ref> tributes poured in from across the entertainment industry, celebrating Duvall's unique screen presence, artistic versatility, and resilience. In a tribute published on social media,<ref>{{cite web |date=July 11, 2024 |title=Stephen King Mourns 'The Shining' Star Shelley Duvall: 'Wonderful, Talented, Underrated Actress' |url=https://variety.com/2024/film/news/shelley-duvall-stephen-king-hollywood-tributes-1236067396/ |website=Variety |access-date=July 11, 2024}}</ref> author [[Stephen King]], who wrote the novel ''[[The Shining (novel)|The Shining]]'', expressed sorrow, writing: "Very sorry Shelley Duvall has passed. Wonderful, talented, underrated actress."
 
-Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised her warmth, pride in her body of work, and devotion to her fans.<ref>{{cite web |last=Unkrich |first=Lee |date=July 11, 2024 |title=Remembering Shelley Duvall: Director Lee Unkrich on His Friendship With the Beloved Icon |url=https://www.hollywoodreporter.com/movies/movie-features/shelley-duvall-remembered-lee-unkrich-director-shining-1235946890/ |website=The Hollywood Reporter |access-date=July 11, 2024}}</ref> The estate of [[Stanley Kubrick]] issued a tribute acknowledging her memorable contribution to cinema, noting: "She will always be remembered for her iconic role as Wendy Torrance in ''The Shining''."<ref>{{cite web |date=July 11, 2024 |title=Stanley Kubrick Estate Honors Shelley Duvall: 'Her Huge Talent Will Not Be Forgotten' |url=https://variety.com/2024/film/news/stanley-kubrick-estate-tribute-shelley-duvall-1236067450/ |website=Variety |access-date=July 11, 2024}}</ref> The [[Academy of Motion Picture Arts and Sciences]] and the [[Cannes Film Festival]] also honored her memory, commemorating her Cannes Best Actress win for ''[[3 Women]]'' as a milestone in independent cinema.<ref>{{cite web |date=July 12, 2024 |title=Cannes Film Festival Remembers Best Actress Winner Shelley Duvall |url=https://www.festival-cannes.com/en/2024/hommage-a-shelley-duvall/ |website=Festival de Cannes |access-date=July 12, 2024}}</ref>
+In a retrospective essay for ''The Hollywood Reporter'',<ref>{{cite web |last=Unkrich |first=Lee |date=July 11, 2024 |title=Remembering Shelley Duvall: Director Lee Unkrich on His Friendship With the Beloved Icon |url=https://www.hollywoodreporter.com/movies/movie-features/shelley-duvall-remembered-lee-unkrich-director-shining-1235946890/ |website=The Hollywood Reporter |access-date=July 11, 2024}}</ref> filmmaker [[Lee Unkrich]] praised her warmth, pride in her body of work, and devotion to her fans. Honoring her cinematic contributions, the estate of [[Stanley Kubrick]] issued a statement noting:<ref>{{cite web |date=July 11, 2024 |title=Stanley Kubrick Estate Honors Shelley Duvall: 'Her Huge Talent Will Not Be Forgotten' |url=https://variety.com/2024/film/news/stanley-kubrick-estate-tribute-shelley-duvall-1236067450/ |website=Variety |access-date=July 11, 2024}}</ref> "She will always be remembered for her iconic role as Wendy Torrance in ''The Shining''." Commemorating her Cannes Best Actress win for ''[[3 Women]]'', the [[Cannes Film Festival]] published a tribute,<ref>{{cite web |date=July 12, 2024 |title=Cannes Film Festival Remembers Best Actress Winner Shelley Duvall |url=https://www.festival-cannes.com/en/2024/hommage-a-shelley-duvall/ |website=Festival de Cannes |access-date=July 12, 2024}}</ref> honoring her memory and celebrating her contribution to independent cinema.
 """
             if "=== Illness and death ===" not in draft:
                 draft = re.sub(
@@ -872,6 +954,7 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             if "[[Category:2024 deaths]]" not in draft:
                 draft += "\n[[Category:2024 deaths]]"
 
+            draft = update_short_description(draft, title, birth_date="1949-07-07", death_date="2024-07-11", default_role="American actress")
             summary = "Thoroughly revised article to reflect post-death developments: updated Infobox with death date (July 11, 2024), place (Blanco, Texas), and cause (diabetes complications); updated Lead sentence to past tense; added return to acting in 'The Forest Hills' (2023); added Illness and death section with Dan Gilroy's statement; added Legacy and tributes section (Stephen King, Lee Unkrich, Kubrick estate); audited grammar; removed Category:Living people; and added verified citations."
 
         else:
@@ -991,6 +1074,7 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             if "== references ==" not in draft.lower() and "{{reflist" not in draft.lower():
                 draft += "\n\n== References ==\n{{reflist}}\n"
 
+            draft = update_short_description(draft, title, birth_date=raw_birth_date, death_date=raw_death_date, default_role=", ".join(wikidata_facts.get("occupations", [])).capitalize())
             summary = f"Rule-based revision: formatted according to Justapedia and American English conventions, updated infobox template fields, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added death categories."
 
         facts = {
