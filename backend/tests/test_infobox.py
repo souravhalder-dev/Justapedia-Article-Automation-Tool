@@ -3,6 +3,7 @@ from app.services.ai_service import (
     parse_date_components,
     format_wiki_birth_date,
     format_wiki_death_date,
+    convert_infobox_dates_to_plain_text,
     format_american_location,
     rewrite_article_prose,
     synthesize_original_death_section,
@@ -12,22 +13,40 @@ from app.services.ai_service import (
 def test_parse_date_components():
     assert parse_date_components("1949-07-07") == (1949, 7, 7)
     assert parse_date_components("July 11, 2024") == (2024, 7, 11)
-    assert parse_date_components("January 1, 1950") == (1950, 1, 1)
+    assert parse_date_components("February 6, 2002") == (2002, 2, 6)
+    assert parse_date_components("21 July 2024") == (2024, 7, 21)
+    assert parse_date_components("{{birth date|2002|2|6}}") == (2002, 2, 6)
+    assert parse_date_components("{{death date and age|2024|7|21|2002|2|6}}") == (2024, 7, 21)
     assert parse_date_components(None) is None
 
 def test_format_wiki_birth_date():
-    # For deceased individuals: {{birth date|...}} without 'and age' per MOS:DATE
-    assert format_wiki_birth_date("1949-07-07", is_deceased=True) == "{{birth date|1949|7|7}}"
-    # For living individuals: {{birth date and age|...}}
-    assert format_wiki_birth_date("1949-07-07", is_deceased=False) == "{{birth date and age|1949|7|7}}"
-    assert format_wiki_birth_date("1949", is_deceased=True) == "1949"
+    # Plain text in American date format (Month Day, Year) without any templates
+    assert format_wiki_birth_date("1949-07-07") == "July 7, 1949"
+    assert format_wiki_birth_date("February 6, 2002") == "February 6, 2002"
+    assert format_wiki_birth_date("6 February 2002") == "February 6, 2002"
+    assert format_wiki_birth_date("1949") == "1949"
 
 def test_format_wiki_death_date():
-    # When both birth and death are known, use {{death date and age}} with 6 parameters
-    assert format_wiki_death_date("2024-07-11", "1949-07-07") == "{{death date and age|2024|7|11|1949|7|7}}"
-    # When birth is unknown, use {{death date}} with 3 parameters
-    assert format_wiki_death_date("2024-07-11", "") == "{{death date|2024|7|11}}"
-    assert format_wiki_death_date("2024", "") == "2024"
+    # Plain text in American date format (Month Day, Year) without any templates
+    assert format_wiki_death_date("2024-07-21") == "July 21, 2024"
+    assert format_wiki_death_date("2024-07-11", "1949-07-07") == "July 11, 2024"
+    assert format_wiki_death_date("21 July 2024") == "July 21, 2024"
+    assert format_wiki_death_date("2024") == "2024"
+
+def test_convert_infobox_dates_to_plain_text():
+    wikitext = (
+        "{{Infobox person\n"
+        "| name = Jane Doe\n"
+        "| birth_date = {{birth date and age|2002|2|6}}\n"
+        "| death_date = {{death date and age|2024|7|21|2002|2|6}}\n"
+        "| death_place = Blanco, Texas, U.S.\n"
+        "}}"
+    )
+    converted = convert_infobox_dates_to_plain_text(wikitext)
+    assert "| birth_date = February 6, 2002" in converted
+    assert "| death_date = July 21, 2024" in converted
+    assert "{{birth date" not in converted
+    assert "{{death date" not in converted
 
 def test_format_american_location():
     assert format_american_location("Blanco, Texas, United States") == "Blanco, Texas, U.S."
@@ -38,6 +57,11 @@ def test_rewrite_article_prose_converts_spelling_and_dates():
     raw_wikitext = (
         "{{short description|English actor}}\n"
         "{{use dmy dates|date=July 2020}}\n"
+        "{{Infobox person\n"
+        "| name = Geoffrey Stone\n"
+        "| birth_date = {{birth date|1945|6|15}}\n"
+        "| death_date = {{death date|2024|7|11}}\n"
+        "}}\n"
         "'''Geoffrey Stone''' (born 15 June 1945) is an English actor who has appeared in the [[National Theatre]]. "
         "His favourite colour was featured in a television programme. On 11 July 2024, he passed away.<ref>{{cite web |title=Honour}}</ref>"
     )
@@ -52,6 +76,12 @@ def test_rewrite_article_prose_converts_spelling_and_dates():
     # Wikipedia maintenance templates must be removed
     assert "{{short description" not in rewritten
     assert "{{use dmy dates" not in rewritten
+
+    # Infobox dates must be converted to plain text American format (no templates)
+    assert "| birth_date = June 15, 1945" in rewritten
+    assert "| death_date = July 11, 2024" in rewritten
+    assert "{{birth date" not in rewritten
+    assert "{{death date" not in rewritten
 
     # British spelling in prose must be normalized to American spelling
     assert "favorite" in rewritten
@@ -120,8 +150,9 @@ async def test_fallback_synthesizer_leaves_unverified_fields_blank():
     )
     draft = result["generated_draft"]
 
-    # Infobox must contain death_date but NOT guess death_place or death_cause
-    assert "| death_date         = {{death date and age|2023|12|1|1950|1|1}}" in draft
+    # Infobox must contain plain text death_date but NOT guess death_place or death_cause
+    assert "| death_date         = December 1, 2023" in draft
+    assert "{{death date" not in draft
     assert "| death_place" not in draft
     assert "| death_cause" not in draft
     assert "United States" not in draft
@@ -175,10 +206,12 @@ async def test_fallback_synthesizer_generates_infobox_with_american_conventions(
     )
     draft = result["generated_draft"]
     
-    # Check Infobox person exists
+    # Check Infobox person exists with plain text American dates (no templates)
     assert "{{Infobox person" in draft
-    assert "| death_date         = {{death date and age|2024|3|15|1940|5|12}}" in draft
-    assert "| birth_date         = {{birth date|1940|5|12}}" in draft
+    assert "| death_date         = March 15, 2024" in draft
+    assert "| birth_date         = May 12, 1940" in draft
+    assert "{{death date" not in draft
+    assert "{{birth date" not in draft
     # Check American location formatting (U.S.)
     assert "| death_place        = Austin, Texas, U.S." in draft
     assert "| death_cause        = Cardiac arrest" in draft

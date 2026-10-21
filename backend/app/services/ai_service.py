@@ -8,63 +8,49 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 def parse_date_components(date_str: str) -> Optional[Tuple[int, int, int]]:
-    """Parse YYYY-MM-DD or Month Day, Year into (year, month, day)."""
+    """Parse YYYY-MM-DD, Month Day, Year, Day Month Year, or MediaWiki date template into (year, month, day)."""
     if not date_str:
         return None
-    m_iso = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", str(date_str))
+    s = str(date_str).strip()
+
+    # 1. MediaWiki template: {{birth date|1949|7|7}} or {{death date and age|2024|7|21|...}}
+    if s.startswith("{{") and s.endswith("}}"):
+        parts = [p.strip() for p in s.strip("{}").split("|")]
+        int_args = []
+        for p in parts[1:]:
+            if "=" in p:
+                continue
+            m = re.match(r"^(\d{1,4})$", p)
+            if m:
+                int_args.append(int(m.group(1)))
+        if len(int_args) >= 3:
+            y, m, d = int_args[0], int_args[1], int_args[2]
+            if 1 <= m <= 12 and 1 <= d <= 31:
+                return y, m, d
+
+    # 2. ISO format YYYY-MM-DD
+    m_iso = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
     if m_iso:
         return int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
-    
+
     months = {
         "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
         "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
     }
-    m_us = re.search(r"([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})", str(date_str))
+    # 3. American Month Day, Year: February 6, 2002 or July 21, 2024
+    m_us = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", s)
     if m_us and m_us.group(1).lower() in months:
         return int(m_us.group(3)), months[m_us.group(1).lower()], int(m_us.group(2))
+
+    # 4. Day Month Year: 6 February 2002 or 21 July 2024
+    m_dmy = re.search(r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", s)
+    if m_dmy and m_dmy.group(2).lower() in months:
+        return int(m_dmy.group(3)), months[m_dmy.group(2).lower()], int(m_dmy.group(1))
+
     return None
 
-def format_wiki_birth_date(birth_str: str, is_deceased: bool) -> str:
-    """Format birth date according to American English Wikipedia infobox rules."""
-    parts = parse_date_components(birth_str)
-    if parts:
-        y, m, d = parts
-        if is_deceased:
-            # Per MOS:DATE, {{birth date and age}} is never used for deceased subjects
-            return f"{{{{birth date|{y}|{m}|{d}}}}}"
-        else:
-            return f"{{{{birth date and age|{y}|{m}|{d}}}}}"
-    m_year = re.search(r"\b(19\d\d|20\d\d)\b", str(birth_str or ""))
-    if m_year:
-        return m_year.group(1)
-    return str(birth_str or "")
-
-def format_wiki_death_date(death_str: str, birth_str: str) -> str:
-    """Format death date according to American English Wikipedia infobox rules."""
-    d_parts = parse_date_components(death_str)
-    b_parts = parse_date_components(birth_str)
-    if d_parts and b_parts:
-        dy, dm, dd = d_parts
-        by, bm, bd = b_parts
-        return f"{{{{death date and age|{dy}|{dm}|{dd}|{by}|{bm}|{bd}}}}}"
-    elif d_parts:
-        dy, dm, dd = d_parts
-        return f"{{{{death date|{dy}|{dm}|{dd}}}}}"
-    m_year = re.search(r"\b(19\d\d|20\d\d)\b", str(death_str or ""))
-    if m_year:
-        return m_year.group(1)
-    return str(death_str or "")
-
-def format_american_location(loc_str: str) -> str:
-    """Format geographical location according to American standards (e.g. 'City, State, U.S.')."""
-    if not loc_str:
-        return ""
-    loc = loc_str.strip()
-    loc = re.sub(r",\s*(?:United States of America|United States|USA|US)\b", ", U.S.", loc, flags=re.IGNORECASE)
-    return loc
-
 def format_american_date_prose(date_str: str) -> str:
-    """Format a date string into standard American prose: Month Day, Year (e.g. July 11, 2024)."""
+    """Format a date string into standard American plain text: Month Day, Year (e.g. February 6, 2002)."""
     parts = parse_date_components(date_str)
     if parts:
         y, m, d = parts
@@ -73,10 +59,62 @@ def format_american_date_prose(date_str: str) -> str:
             "July", "August", "September", "October", "November", "December"
         ]
         return f"{month_names[m - 1]} {d}, {y}"
-    m_y = re.search(r"\b(19\d\d|20\d\d)\b", date_str or "")
+    m_y = re.search(r"\b(19\d\d|20\d\d)\b", str(date_str or ""))
     if m_y:
         return m_y.group(1)
-    return date_str or ""
+    return str(date_str or "").strip()
+
+def format_wiki_birth_date(birth_str: str, is_deceased: bool = True) -> str:
+    """
+    Format birth date directly into the infobox as plain text using the American date format
+    (Month Day, Year) without using any templates (e.g. 'February 6, 2002' or 'July 7, 1949').
+    """
+    return format_american_date_prose(birth_str)
+
+def format_wiki_death_date(death_str: str, birth_str: str = "") -> str:
+    """
+    Format death date directly into the infobox as plain text using the American date format
+    (Month Day, Year) without using any templates (e.g. 'July 21, 2024' or 'July 11, 2024').
+    """
+    return format_american_date_prose(death_str)
+
+def convert_infobox_dates_to_plain_text(wikitext: str) -> str:
+    """
+    Converts dates of birth and death in infoboxes into the American date format (Month Day, Year)
+    as plain text without using any templates.
+    Handles existing template values like {{birth date and age|...}}, {{birth date|...}},
+    {{death date and age|...}}, {{death date|...}}, as well as raw ISO or Day-Month-Year dates.
+    Example:
+    | birth_date = February 6, 2002
+    | death_date = July 21, 2024
+    """
+    if not wikitext:
+        return ""
+    pattern = re.compile(
+        r"(\|\s*(?:birth_date|birth-date|death_date|death-date)\s*=\s*)([^\n]+)",
+        re.IGNORECASE
+    )
+    def repl(m):
+        prefix = m.group(1)
+        raw_val = m.group(2).strip()
+        comment_match = re.search(r"(<!--.*?-->)", raw_val)
+        comment_str = f" {comment_match.group(1)}" if comment_match else ""
+        clean_val = re.sub(r"<!--.*?-->", "", raw_val).strip()
+        if clean_val:
+            converted = format_american_date_prose(clean_val)
+            if converted:
+                return f"{prefix}{converted}{comment_str}"
+        return m.group(0)
+
+    return pattern.sub(repl, wikitext)
+
+def format_american_location(loc_str: str) -> str:
+    """Format geographical location according to American standards (e.g. 'City, State, U.S.')."""
+    if not loc_str:
+        return ""
+    loc = loc_str.strip()
+    loc = re.sub(r",\s*(?:United States of America|United States|USA|US)\b", ", U.S.", loc, flags=re.IGNORECASE)
+    return loc
 
 def split_prose_and_markup(text: str) -> List[Tuple[str, bool]]:
     """
@@ -298,6 +336,9 @@ def rewrite_article_prose(
                 count=1,
                 flags=re.IGNORECASE
             )
+
+    # 4. Convert all infobox birth and death dates into plain text American format (no templates)
+    result_text = convert_infobox_dates_to_plain_text(result_text)
 
     return result_text
 
@@ -667,11 +708,17 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
      * Preserve all existing tables, filmographies, and templates without truncation.
 
 6. INFOBOX TEMPLATE RULES & AMERICAN ENGLISH CONVENTIONS (MOS:ENGVAR, MOS:DATETYPE, MOS:NUM):
+   - INFOBOX DATES MANDATE (NO TEMPLATES):
+     * Update the dates of birth and death in the infobox using the American date format, without using any templates.
+     * Enter the dates directly into the infobox as plain text, following the appropriate infobox formatting conventions.
+     * Example:
+       | birth_date = February 6, 2002
+       | death_date = July 21, 2024
    - TEMPLATE RULES & FIELD SEPARATION:
      * Use the appropriate canonical infobox (e.g. `{{Infobox person}}`, `{{Infobox actor}}`, `{{Infobox musical artist}}`, `{{Infobox politician}}`). If none exists, construct and prepend one at the top.
      * Strictly separate fields into their canonical parameters:
-       - `birth_date`: For deceased individuals, MUST use `{{birth date|YYYY|MM|DD}}`. NEVER use `{{birth date and age}}` for deceased subjects.
-       - `death_date`: MUST contain ONLY the date or MediaWiki date template: `{{death date and age|deathYYYY|deathMM|deathDD|birthYYYY|birthMM|birthDD}}`. NEVER put locations or causes in death_date.
+       - `birth_date`: Enter directly into the infobox as plain text using the American date format (Month Day, Year), WITHOUT using any templates (e.g. `| birth_date = February 6, 2002` or `| birth_date = July 7, 1949`). Never use {{birth date}} or {{birth date and age}}.
+       - `death_date`: Enter directly into the infobox as plain text using the American date format (Month Day, Year), WITHOUT using any templates (e.g. `| death_date = July 21, 2024` or `| death_date = July 11, 2024`). Never use {{death date}} or {{death date and age}}. NEVER put locations or causes in death_date.
        - `death_place`: MUST contain ONLY the geographical location formatted per American standards (e.g. `[[Blanco, Texas]], U.S.` or `Los Angeles, California, U.S.`). NEVER put medical causes or dates in death_place.
        - `death_cause`: MUST contain ONLY the verified medical/official cause of death (e.g. `Complications from [[diabetes mellitus|diabetes]]` or `Cardiac arrest`). If unverified, leave blank.
        - `years_active`: Close open ranges upon death using an en dash (e.g. `1970–2002, 2022–2023`, NEVER `present`).
@@ -753,10 +800,10 @@ Respond ONLY with a JSON object conforming to this schema:
 
         # 1. Update Infobox
         if "duvall" in title.lower():
-            # Infobox updates
+            # Infobox updates with plain text American dates (no templates)
             draft = re.sub(
-                r"\|\s*birth_date\s*=\s*\{\{birth date and age\|1949\|7\|7\}\}",
-                r"| birth_name         = Shelley Alexis Duvall\n| birth_date         = {{birth date|1949|7|7}}\n| death_date         = {{death date and age|2024|7|11|1949|7|7}}\n| death_place        = [[Blanco, Texas]], U.S.\n| death_cause        = Complications from [[diabetes]]",
+                r"\|\s*birth_date\s*=\s*(?:\{\{birth date[^}]*\}\}|[^\n]+)",
+                r"| birth_name         = Shelley Alexis Duvall\n| birth_date         = July 7, 1949\n| death_date         = July 11, 2024\n| death_place        = [[Blanco, Texas]], U.S.\n| death_cause        = Complications from [[diabetes]]",
                 draft
             )
             draft = re.sub(
@@ -851,9 +898,14 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             has_existing_infobox = bool(re.search(r"\{\{Infobox", draft, re.IGNORECASE))
 
             if has_existing_infobox:
-                # Convert living {{birth date and age}} to {{birth date}} for deceased subjects
-                if is_deceased:
-                    draft = re.sub(r"\{\{birth date and age\b", "{{birth date", draft, flags=re.IGNORECASE)
+                # Convert any existing birth/death date templates to plain text American format
+                draft = convert_infobox_dates_to_plain_text(draft)
+
+                # Populate empty death_date or birth_date parameter if present with no value
+                if death_date_val and re.search(r"\|\s*death_date\s*=\s*(?:\n|\||\}\})", draft):
+                    draft = re.sub(r"(\|\s*death_date\s*=\s*)(?=\n|\||\}\})", rf"\1{death_date_val}", draft, count=1)
+                if birth_date_val and re.search(r"\|\s*birth_date\s*=\s*(?:\n|\||\}\})", draft):
+                    draft = re.sub(r"(\|\s*birth_date\s*=\s*)(?=\n|\||\}\})", rf"\1{birth_date_val}", draft, count=1)
 
                 infobox_insert = ""
                 if birth_date_val and "birth_date" not in draft.lower() and "birth-date" not in draft.lower():
@@ -868,7 +920,7 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
                 if infobox_insert and re.search(r"(\{\{Infobox[\s\S]*?)(\n\}\})", draft, re.IGNORECASE):
                     draft = re.sub(r"(\{\{Infobox[\s\S]*?)(\n\}\})", rf"\1{infobox_insert}\2", draft, count=1, flags=re.IGNORECASE)
             else:
-                # Construct proper American English {{Infobox person}} from scratch
+                # Construct proper American English {{Infobox person}} from scratch with plain text dates
                 infobox_lines = [
                     "{{Infobox person",
                     f"| name               = {title}",
@@ -950,6 +1002,9 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             "occupations": ["Subject"],
             "summary_of_life": f"{title} biographical article revision."
         }
+
+        # Ensure all infobox birth and death dates are formatted in American plain text (no templates)
+        draft = convert_infobox_dates_to_plain_text(draft)
 
         return {
             "facts": facts,
