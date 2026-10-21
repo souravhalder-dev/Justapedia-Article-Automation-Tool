@@ -212,7 +212,20 @@ export function App() {
     try {
       const art = articles.find(a => a.id === selectedArticleId);
       const res = await api.saveToJustapedia(selectedArticleId, options, art?.title);
-      await refreshArticle(selectedArticleId);
+      
+      if (res.success) {
+        // Once successfully updated and saved, it should no longer appear in the list of articles that need updating
+        const remaining = articles.filter(a => a.id !== selectedArticleId);
+        setArticles(remaining);
+        localStorage.setItem('justapedia_queue', JSON.stringify(remaining));
+        if (remaining.length > 0) {
+          setSelectedArticleId(remaining[0].id);
+        } else {
+          setSelectedArticleId(null);
+        }
+      } else {
+        await refreshArticle(selectedArticleId);
+      }
       return res;
     } finally {
       setIsLoading(false);

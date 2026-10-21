@@ -239,24 +239,37 @@ class AIService:
             if research_context.get("career_updates_text"):
                 research_notes += f"\n[RESEARCH: Recent Career & Works]:\n{research_context['career_updates_text']}\n"
 
-        prompt = f"""You are a master encyclopedia editor and fact-checker for Justapedia Wiki.
-Your task is to thoroughly review the ENTIRE existing Justapedia article for "{title}", identify outdated or missing information, and produce a COMPLETE, thoroughly revised version of the article.
+        prompt = f"""You are a master encyclopedia editor and fact-checker for Justapedia Wiki, strictly following Wikipedia's Manual of Style (WP:MOS), editorial guidelines, and wiki-style formatting conventions.
+Your task is to thoroughly review the ENTIRE existing Justapedia article for "{title}", identify outdated or missing information, and produce a COMPLETE, high-quality revised version of the article.
 
-CRITICAL INSTRUCTIONS:
-Do NOT simply update birth and death dates. You must thoroughly review the ENTIRE article and make all necessary changes to reflect developments and information published after the subject's death.
+CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
+1. ORIGINAL WORDING ONLY (WP:COPYVIO & ANTI-PLAGIARISM):
+   - All newly added information MUST be written in original encyclopedic wording.
+   - Do NOT copy phrases, sentences, or paragraphs verbatim from copyrighted news sources, obituaries, or websites.
+   - Synthesize facts into original, concise, and neutral encyclopedic prose.
 
-SPECIFIC EDITORIAL REQUIREMENTS FOR DECEASED SUBJECTS:
-1. INFOBOX:
-   - Update infobox person to replace 'birth date and age' with standard 'birth date'.
-   - Add 'death_date = {{{{death date and age|YYYY|MM|DD|birthYYYY|birthMM|birthDD}}}}'.
-   - Add 'death_place' and 'death_cause'.
-   - Update 'years_active' to close 'present' (e.g. 1970–2002, 2022–2023).
-   - Update 'partner' or 'spouse' to close 'present' (e.g. '1989–2024; her death').
+2. WIKIPEDIA REFERENCING GUIDELINES (WP:RS, WP:V, WP:CITE):
+   - Every newly added fact, date, cause of death, career milestone, or quote MUST be supported by an appropriate inline citation.
+   - Format citations using standard MediaWiki citation templates:
+     `<ref>{{{{cite news |last=... |first=... |date=... |title=... |newspaper=... |url=... |access-date=...}}}}</ref>`
+     or `<ref>{{{{cite web |date=... |title=... |website=... |url=... |access-date=...}}}}</ref>`.
+   - Ensure all references are properly formatted, relevant, verifiable, and point to reliable sources.
+   - Never output bare URLs in <ref> tags.
+   - The article must end with a standard References section:
+     == References ==
+     {{{{reflist}}}}
 
-2. LEAD SECTION:
-   - Rewrite the lead sentence in past tense ("was an American actress...", not "is").
-   - Include life dates in parentheses.
-   - Summarize major career achievements, awards, and mention her final career role and death.
+3. WIKI-STYLE STRUCTURE & FORMATTING:
+   - Proper section hierarchy (`== Section ==`, `=== Subsection ===`).
+   - Standard Lead paragraph: bold the subject's name `'''{title}'''`, life dates in parentheses, nationality, and primary achievements.
+   - Infobox at the top (`{{{{Infobox person}}}}` or domain infobox) with birth date, death date, death place, and cause of death.
+   - For deceased subjects:
+     * Convert verbs describing the subject from present tense ("is", "lives in") to past tense ("was", "lived in").
+     * Infobox: use `death_date = {{{{death date and age|deathYYYY|deathMM|deathDD|birthYYYY|birthMM|birthDD}}}}`.
+     * Add or expand `=== Illness and death ===` or `== Death ==` with verified date, location, cause, and family/official statements in original wording.
+     * Add `== Legacy and tributes ==` documenting public and industry tributes.
+     * Categories: MUST remove `[[Category:Living people]]` and ensure appropriate death categories (e.g. `[[Category:YYYY deaths]]`).
+     * Preserve all existing tables, filmographies, and templates without truncation.
 
 3. CAREER EXPANSION:
    - Include all notable later work (e.g. for Shelley Duvall, her return to acting in the 2023 film 'The Forest Hills' after a 20-year hiatus).
@@ -426,43 +439,70 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             death_cause_val = wikidata_facts.get("cause_of_death") or ""
             birth_date_val = wikidata_facts.get("birth_date") or ""
             
-            # 1. Update Infobox if death_date exists and not in draft
-            if death_date_val and "death_date" not in draft.lower():
-                infobox_insert = f"\n| death_date         = {death_date_val}"
-                if death_place_val:
+            # 1. Update Infobox if birth_date or death_date exists and not in draft
+            infobox_insert = ""
+            if birth_date_val and "birth_date" not in draft.lower() and "birth-date" not in draft.lower():
+                infobox_insert += f"\n| birth_date         = {birth_date_val}"
+            if death_date_val and "death_date" not in draft.lower() and "death-date" not in draft.lower():
+                infobox_insert += f"\n| death_date         = {death_date_val}"
+                if death_place_val and "death_place" not in draft.lower():
                     infobox_insert += f"\n| death_place        = {death_place_val}"
-                if death_cause_val:
+                if death_cause_val and "death_cause" not in draft.lower() and "cause_of_death" not in draft.lower():
                     infobox_insert += f"\n| death_cause        = {death_cause_val}"
-                if re.search(r"(\{\{Infobox[\s\S]*?)(\n\}\})", draft, re.IGNORECASE):
-                    draft = re.sub(r"(\{\{Infobox[\s\S]*?)(\n\}\})", rf"\1{infobox_insert}\2", draft, count=1, flags=re.IGNORECASE)
+            
+            if infobox_insert and re.search(r"(\{\{Infobox[\s\S]*?)(\n\}\})", draft, re.IGNORECASE):
+                draft = re.sub(r"(\{\{Infobox[\s\S]*?)(\n\}\})", rf"\1{infobox_insert}\2", draft, count=1, flags=re.IGNORECASE)
 
-            # 2. Update lead tense from present to past
+            # 2. Update lead tense from present to past for deceased individuals
             if is_deceased:
                 draft = re.sub(r"\b(is an?|is a)\b", "was an", draft, count=1)
                 draft = re.sub(r"\b(is the recipient)\b", "was the recipient", draft, count=1)
+                draft = re.sub(r"\b(is known for)\b", "was known for", draft, count=1)
 
-            # 3. Add Illness and Death / Tributes section from research context if available
+            # 3. Add Illness and Death / Tributes section from research context or verified sources
             death_sec = (research_context or {}).get("death_section_text", "")
-            if death_sec and "illness and death" not in draft.lower() and "=== death ===" not in draft.lower():
+            if death_sec and "illness and death" not in draft.lower() and "=== death ===" not in draft.lower() and "== death ==" not in draft.lower():
                 draft += f"\n\n== Illness and death ==\n{death_sec}\n"
 
             legacy_sec = (research_context or {}).get("legacy_section_text", "")
             if legacy_sec and "tribute" not in draft.lower() and "legacy" not in draft.lower():
                 draft += f"\n\n== Legacy and tributes ==\n{legacy_sec}\n"
 
-            # 4. Fix Categories
+            # 4. Integrate properly structured citations from verified sources following Wikipedia guidelines
+            citation_tags = ""
+            for s in sources[:4]:
+                s_url = s.get("url", "")
+                s_title = s.get("title", "")
+                s_pub = s.get("publisher", "Web")
+                if s_url and s_title and s_url not in draft:
+                    citation_tags += f"<ref>{{{{cite web |url={s_url} |title={s_title} |website={s_pub} |access-date=2024}}}}</ref>"
+
+            if citation_tags and "<ref" not in draft:
+                # Add to first paragraph or death section
+                if "== Illness and death ==" in draft:
+                    draft = draft.replace("== Illness and death ==", f"== Illness and death ==\n{citation_tags}")
+                else:
+                    lines = draft.split("\n\n")
+                    if len(lines) > 1:
+                        lines[1] = lines[1] + citation_tags
+                        draft = "\n\n".join(lines)
+
+            # 5. Fix Categories (Remove Living people, add death year categories)
             if is_deceased:
                 draft = re.sub(r"\[\[Category:Living people\]\]\n?", "", draft, flags=re.IGNORECASE)
                 if death_year:
-                    death_cat = f"[[Category:Deaths in {death_year}]]"
-                    if death_cat not in draft:
-                        draft += f"\n{death_cat}"
+                    death_cat_1 = f"[[Category:{death_year} deaths]]"
+                    death_cat_2 = f"[[Category:Deaths in {death_year}]]"
+                    if death_cat_1 not in draft:
+                        draft += f"\n{death_cat_1}"
+                    if death_cat_2 not in draft:
+                        draft += f"\n{death_cat_2}"
 
-            # 5. Ensure References section exists
-            if "<ref" in draft and "== references ==" not in draft.lower() and "{{reflist" not in draft.lower():
+            # 6. Ensure References section exists and is properly formatted with {{reflist}}
+            if "== references ==" not in draft.lower() and "{{reflist" not in draft.lower():
                 draft += "\n\n== References ==\n{{reflist}}\n"
 
-            summary = f"Rule-based revision (No AI): updated death dates ({death_date_val}), harmonized past tense, updated death categories, and verified references."
+            summary = f"Rule-based revision: formatted according to Wikipedia guidelines, updated infobox dates, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added death categories."
 
         facts = {
             "full_name": title,

@@ -20,19 +20,27 @@ router = APIRouter(prefix="/api/articles", tags=["Articles"])
 
 @router.get("", response_model=List[ArticleJobResponse])
 async def list_articles(
-    status: Optional[str] = Query(None),
-    mode: Optional[str] = Query(None),
-    priority: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    status: Optional[str] = None,
+    mode: Optional[str] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
+    exclude_saved: bool = True,
+    limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db)
 ):
-    """List all article jobs with optional filtering."""
+    """
+    List article jobs that need updating.
+    By default (exclude_saved=True), articles that were already successfully updated and saved
+    are automatically filtered out and not shown.
+    """
     stmt = select(ArticleJob).options(selectinload(ArticleJob.sources)).order_by(desc(ArticleJob.updated_at))
     
     if status:
         stmt = stmt.where(ArticleJob.status == status)
+    elif exclude_saved:
+        stmt = stmt.where(ArticleJob.status != "saved")
+
     if mode:
         stmt = stmt.where(ArticleJob.mode == mode)
     if priority:

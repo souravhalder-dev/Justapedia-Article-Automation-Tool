@@ -31,11 +31,9 @@ export const ArticleQueue: React.FC<ArticleQueueProps> = ({
 
   // Filtering
   const filteredArticles = articles.filter(a => {
-    // If hiding done articles:
-    if (hideDone) {
-      if (a.status === 'saved') return false;
-      if (a.status === 'discovered' && (!a.audit_flags || a.audit_flags.length === 0)) return false;
-    }
+    // Once an article is saved, never display it in the list of articles needing updates
+    if (a.status === 'saved') return false;
+    if (hideDone && a.status === 'discovered' && (!a.audit_flags || a.audit_flags.length === 0)) return false;
 
     const matchesSearch = a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (a.category && a.category.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -43,7 +41,6 @@ export const ArticleQueue: React.FC<ArticleQueueProps> = ({
     if (!matchesSearch) return false;
     if (filterStatus === 'all') return true;
     if (filterStatus === 'ready') return a.status === 'draft_ready';
-    if (filterStatus === 'saved') return a.status === 'saved';
     if (filterStatus === 'errors') return a.status === 'error';
     if (filterStatus === 'pending') return a.status === 'discovered' || a.status === 'analyzed';
     return a.status === filterStatus;
@@ -145,10 +142,9 @@ export const ArticleQueue: React.FC<ArticleQueueProps> = ({
         {/* Filter Pills */}
         <div className="flex items-center space-x-1 overflow-x-auto pb-1 text-xs">
           {[
-            { id: 'all', label: 'All' },
-            { id: 'pending', label: 'Pending' },
+            { id: 'all', label: 'All Needing Updates' },
+            { id: 'pending', label: 'Pending Research' },
             { id: 'ready', label: 'Draft Ready' },
-            { id: 'saved', label: 'Published' },
             { id: 'errors', label: 'Errors' },
           ].map(f => (
             <button

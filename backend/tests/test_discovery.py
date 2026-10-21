@@ -97,3 +97,33 @@ John Incomplete (born January 1, 1950) was an actor who died in 2024.
             assert job_incomplete.title == "John Incomplete"
             flags = json.loads(job_incomplete.audit_flags)
             assert "missing_death_date" in flags
+
+@pytest.mark.asyncio
+async def test_saved_articles_excluded_from_active_list():
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        # Create an article marked as saved
+        saved_job = ArticleJob(
+            title="Saved Person 1",
+            mode="deceased",
+            status="saved",
+            priority="medium"
+        )
+        active_job = ArticleJob(
+            title="Active Person 2",
+            mode="deceased",
+            status="discovered",
+            priority="high"
+        )
+        session.add(saved_job)
+        session.add(active_job)
+        await session.commit()
+
+        from app.api.routes_articles import list_articles
+        # Calling list_articles with default exclude_saved=True
+        results = await list_articles(exclude_saved=True, limit=50, offset=0, db=session)
+        titles = [r["title"] for r in results]
+
+        # The saved article must NOT appear in the list of articles that need updating
+        assert "Saved Person 1" not in titles
+        assert "Active Person 2" in titles
