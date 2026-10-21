@@ -1,4 +1,5 @@
 import pytest
+import re
 from app.services.ai_service import (
     parse_date_components,
     format_wiki_birth_date,
@@ -455,4 +456,197 @@ async def test_article_analyzer_flags_cleared_after_full_update():
     assert "few_citations" not in after["flags"]
     assert "no_citations" not in after["flags"]
     assert after["priority"] in ("low", "medium")
+
+
+def test_section_placement_strictly_before_references():
+    """
+    Rule 1: Add all relevant new sections, such as 'Illness and death' and 'Legacy and tributes',
+    strictly before the References section.
+    """
+    from app.services.ai_service import organize_article_structure_and_categories
+
+    wikitext = """{{short description|American actor}}
+'''John Smith''' was an American actor.
+
+== Career ==
+He appeared in numerous films.
+
+== References ==
+{{reflist}}
+
+== Illness and death ==
+Smith died on January 15, 2024, in Los Angeles, California.<ref>{{cite news |title=Obituary}}</ref>
+
+== Legacy and tributes ==
+Tributes were held across Hollywood.<ref>{{cite news |title=Tributes}}</ref>
+
+== External links ==
+* [https://example.com Official Website]
+"""
+    result = organize_article_structure_and_categories(
+        wikitext=wikitext,
+        title="John Smith",
+        is_deceased=True,
+        birth_year="1950",
+        death_year="2024"
+    )
+
+    # Content sections must precede == References ==
+    ref_idx = result.index("== References ==")
+    illness_idx = result.index("== Illness and death ==")
+    legacy_idx = result.index("== Legacy and tributes ==")
+    ext_idx = result.index("== External links ==")
+
+    assert illness_idx < ref_idx
+    assert legacy_idx < ref_idx
+    assert ref_idx < ext_idx
+
+
+def test_categories_moved_out_of_references_to_designated_bottom_area():
+    """
+    Rule 2: If categories already exist in the References section or body,
+    place them in the designated category area at the bottom, not anywhere else.
+    """
+    from app.services.ai_service import organize_article_structure_and_categories
+
+    wikitext = """{{short description|American author}}
+'''Alice Walker''' is an author.
+
+== References ==
+{{reflist}}
+[[Category:Living people]]
+[[Category:American novelists]]
+[[Category:20th-century American writers]]
+
+== External links ==
+* [https://example.com Website]
+[[Category:Women novelists]]
+"""
+    result = organize_article_structure_and_categories(
+        wikitext=wikitext,
+        title="Alice Walker",
+        is_deceased=True,
+        birth_year="1944",
+        death_year="2024"
+    )
+
+    # Categories must NOT be inside the References section
+    ref_section_match = re.search(r"== References ==[\s\S]*?(?===|$)", result)
+    assert ref_section_match is not None
+    ref_section_text = ref_section_match.group(0)
+    assert "[[Category:" not in ref_section_text
+
+    # Living people must be removed for deceased
+    assert "[[Category:Living people]]" not in result
+
+    # Categories must be at the very bottom
+    last_cat_idx = result.rfind("[[Category:")
+    ext_links_idx = result.find("== External links ==")
+    assert last_cat_idx > ext_links_idx
+    assert "[[Category:American novelists]]" in result
+    assert "[[Category:Women novelists]]" in result
+    assert "[[Category:2024 deaths]]" in result
+    assert "[[Category:1944 births]]" in result
+
+
+def test_category_deduplication_case_insensitive():
+    """
+    Rule 3: Avoid duplicate categories. If a category is already present,
+    do not add it again.
+    """
+    from app.services.ai_service import organize_article_structure_and_categories
+
+    wikitext = """'''Bob Jones''' was an artist.
+
+== References ==
+{{reflist}}
+[[Category:American artists]]
+[[Category:american artists]]
+[[Category:American Artists]]
+[[Category:1950 births]]
+"""
+    result = organize_article_structure_and_categories(
+        wikitext=wikitext,
+        title="Bob Jones",
+        is_deceased=True,
+        birth_year="1950",
+        death_year="2024"
+    )
+
+    # Must appear exactly once regardless of case
+    american_artists_count = len(re.findall(r"\[\[Category:\s*american artists\s*\]\]", result, flags=re.IGNORECASE))
+    assert american_artists_count == 1
+
+    births_count = len(re.findall(r"\[\[Category:\s*1950 births\s*\]\]", result, flags=re.IGNORECASE))
+    assert births_count == 1
+
+
+def test_avoid_duplicate_sections_and_repetitive_information():
+    """
+    Rule 4 & 6: Avoid repetitive information and duplicate sections.
+    Merge duplicate headings and avoid repeating identical facts.
+    """
+    from app.services.ai_service import organize_article_structure_and_categories
+
+    wikitext = """'''Charlie Brown''' was a musician.
+
+== Career ==
+Charlie Brown began playing jazz in Chicago in 1970.
+
+== Career ==
+Charlie Brown began playing jazz in Chicago in 1970.
+He later recorded three solo albums.
+
+== References ==
+{{reflist}}
+"""
+    result = organize_article_structure_and_categories(
+        wikitext=wikitext,
+        title="Charlie Brown",
+        is_deceased=False
+    )
+
+    # Only one == Career == section
+    career_headings = len(re.findall(r"==\s*Career\s*==", result))
+    assert career_headings == 1
+
+    # Sentence must not be duplicated
+    chicago_count = result.count("Charlie Brown began playing jazz in Chicago in 1970.")
+    assert chicago_count == 1
+    assert "He later recorded three solo albums." in result
+
+
+def test_citations_placed_inline_before_references():
+    """
+    Rule 7: Ensure that all newly added information is supported by reliable sources,
+    with the appropriate citations placed before the References section.
+    """
+    from app.services.ai_service import organize_article_structure_and_categories
+
+    wikitext = """'''David Evans''' was a physician.
+
+== Medical career ==
+According to published reports in medical journals,<ref>{{cite journal |title=Pioneering Surgery}}</ref> Evans introduced innovative cardiac procedures.
+
+== References ==
+{{reflist}}
+
+== Illness and death ==
+As documented by local obituaries,<ref>{{cite news |title=Evans Passes Away}}</ref> Evans died on June 4, 2024.
+"""
+    result = organize_article_structure_and_categories(
+        wikitext=wikitext,
+        title="David Evans",
+        is_deceased=True,
+        birth_year="1945",
+        death_year="2024"
+    )
+
+    ref_idx = result.index("== References ==")
+    med_ref_idx = result.index("{{cite journal |title=Pioneering Surgery}}")
+    obit_ref_idx = result.index("{{cite news |title=Evans Passes Away}}")
+
+    assert med_ref_idx < ref_idx
+    assert obit_ref_idx < ref_idx
+
 

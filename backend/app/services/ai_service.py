@@ -3,6 +3,7 @@ import logging
 import re
 import asyncio
 from typing import Dict, Any, List, Optional, Tuple
+import mwparserfromhell
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -747,6 +748,198 @@ def merge_infobox_with_wiki_data(
     draft = convert_infobox_dates_to_plain_text(draft)
     return draft
 
+
+def organize_article_structure_and_categories(
+    wikitext: str,
+    title: str = "",
+    is_deceased: bool = True,
+    birth_year: Optional[str] = None,
+    death_year: Optional[str] = None
+) -> str:
+    """
+    Strictly enforces Justapedia and Wikipedia editorial rules for article structure:
+    1. Section placement: Add all relevant new sections (such as 'Illness and death',
+       'Posthumous developments', 'Legacy and tributes', 'Career') strictly before the References section.
+    2. Categories placement: If categories exist in the References section or anywhere in the body,
+       place them in the designated category area at the very bottom, not anywhere else.
+    3. Avoid duplicate categories: Deduplicate categories case-insensitively. Remove living
+       categories (e.g. [[Category:Living people]]) for deceased subjects. Add birth and death categories.
+    4. Avoid repetitive information: Merge duplicate section headings without repeating facts or lines.
+    5. References integrity: Ensure a single standard References section with {{reflist}}
+       placed after content sections and before External links.
+    """
+    if not wikitext or not wikitext.strip():
+        return wikitext
+
+    # Infer birth_year / death_year if missing
+    if not birth_year:
+        m_b = re.search(r"\|\s*birth_date\s*=\s*[^|\n]*\b(19\d\d|20\d\d)\b", wikitext)
+        if m_b:
+            birth_year = m_b.group(1)
+        else:
+            m_b2 = re.search(r"\((?:born\s+)?[A-Za-z]*\s*\d{0,2},?\s*(19\d\d|20\d\d)", wikitext)
+            if m_b2:
+                birth_year = m_b2.group(1)
+
+    if not death_year and is_deceased:
+        m_d = re.search(r"\|\s*death_date\s*=\s*[^|\n]*\b(19\d\d|20\d\d)\b", wikitext)
+        if m_d:
+            death_year = m_d.group(1)
+        else:
+            m_d2 = re.search(r"[–-]\s*(?:[A-Za-z]+\s+\d{1,2},\s*)?(19\d\d|20\d\d)\)", wikitext)
+            if m_d2:
+                death_year = m_d2.group(1)
+
+    # 1. Extract and remove all categories from anywhere in the article
+    cat_pattern = re.compile(r"\[\[\s*Category\s*:\s*([^\]]+?)\s*\]\]", re.IGNORECASE)
+    raw_cats = cat_pattern.findall(wikitext)
+
+    seen_cats = set()
+    unique_cats = []
+
+    for raw in raw_cats:
+        cat_inner = raw.strip()
+        base_cat = cat_inner.split("|")[0].strip()
+        base_lower = base_cat.lower()
+
+        if is_deceased and base_lower in {
+            "living people", "living persons", "living individuals",
+            "possibly living people", "people living in the united states"
+        }:
+            continue
+        if base_lower in seen_cats:
+            continue
+        seen_cats.add(base_lower)
+        unique_cats.append(f"[[Category:{cat_inner}]]")
+
+    if birth_year:
+        by_key = f"{birth_year} births".lower()
+        alt_by = f"births in {birth_year}".lower()
+        if by_key not in seen_cats and alt_by not in seen_cats:
+            seen_cats.add(by_key)
+            unique_cats.append(f"[[Category:{birth_year} births]]")
+
+    if is_deceased and death_year:
+        dy_key = f"{death_year} deaths".lower()
+        if dy_key not in seen_cats:
+            seen_cats.add(dy_key)
+            unique_cats.append(f"[[Category:{death_year} deaths]]")
+        alt_dy = f"deaths in {death_year}".lower()
+        if alt_dy not in seen_cats:
+            seen_cats.add(alt_dy)
+            unique_cats.append(f"[[Category:Deaths in {death_year}]]")
+
+    clean_text = cat_pattern.sub("", wikitext)
+
+    # 2. Extract DEFAULTSORT so it always sits immediately above categories
+    defaultsort_pattern = re.compile(r"(\{\{\s*DEFAULTSORT\s*:[^\}]+\}\})", re.IGNORECASE)
+    defaultsort_matches = defaultsort_pattern.findall(clean_text)
+    defaultsort_str = defaultsort_matches[-1].strip() if defaultsort_matches else ""
+    clean_text = defaultsort_pattern.sub("", clean_text)
+
+    # 3. Extract bottom footer templates like {{Authority control}}
+    auth_control_pattern = re.compile(r"(\{\{\s*(?:Authority\s+control|Normdaten)[^\}]*\}\})", re.IGNORECASE)
+    auth_matches = auth_control_pattern.findall(clean_text)
+    auth_str = auth_matches[0].strip() if auth_matches else ""
+    clean_text = auth_control_pattern.sub("", clean_text)
+
+    # 4. Parse sections with mwparserfromhell
+    parsed = mwparserfromhell.parse(clean_text)
+    sections = parsed.get_sections(levels=[2], include_lead=True)
+
+    BACK_MATTER_KEYS = {
+        "see also": 1,
+        "see also:": 1,
+        "notes": 2,
+        "notes:": 2,
+        "footnotes": 2,
+        "notes and references": 2,
+        "references": 3,
+        "references:": 3,
+        "reference": 3,
+        "sources": 3,
+        "sources:": 3,
+        "bibliography": 3,
+        "further reading": 4,
+        "further reading:": 4,
+        "external links": 5,
+        "external links:": 5,
+        "external link": 5,
+    }
+
+    lead_sec = ""
+    content_secs = []
+    back_matter = {}
+    seen_headings = set()
+
+    for idx, sec in enumerate(sections):
+        sec_str = str(sec).strip()
+        if not sec_str:
+            continue
+        h = sec.filter_headings()
+        if not h:
+            lead_sec = sec_str
+            continue
+
+        h_title = str(h[0].title).strip()
+        h_norm = h_title.lower()
+
+        if h_norm in BACK_MATTER_KEYS:
+            order = BACK_MATTER_KEYS[h_norm]
+            if order in (2, 3):  # Notes or References
+                if "{{reflist" not in sec_str.lower() and "<references" not in sec_str.lower():
+                    sec_str += "\n{{reflist}}"
+            if order not in back_matter:
+                back_matter[order] = sec_str
+            elif order == 3:
+                # Keep only a single canonical References section
+                continue
+            else:
+                back_matter[order] = back_matter[order] + "\n\n" + sec_str
+        else:
+            # Content section
+            if h_norm in seen_headings:
+                for c_idx, (existing_h, existing_sec) in enumerate(content_secs):
+                    if existing_h == h_norm:
+                        lines1 = [l.strip() for l in existing_sec.split("\n") if l.strip()]
+                        lines2 = [l.strip() for l in sec_str.split("\n") if l.strip() and not l.startswith("==")]
+                        s1 = set(lines1)
+                        new_lines = [l for l in lines2 if l not in s1]
+                        if new_lines:
+                            content_secs[c_idx] = (existing_h, existing_sec + "\n\n" + "\n\n".join(new_lines))
+                        break
+            else:
+                seen_headings.add(h_norm)
+                content_secs.append((h_norm, sec_str))
+
+    if 3 not in back_matter:
+        back_matter[3] = "== References ==\n{{reflist}}"
+
+    ordered_body = [lead_sec] if lead_sec else []
+    for _, c_sec in content_secs:
+        ordered_body.append(c_sec)
+
+    for k in sorted(back_matter.keys()):
+        ordered_body.append(back_matter[k])
+
+    final_text = "\n\n".join(ordered_body).strip()
+
+    footer_elements = []
+    if auth_str:
+        footer_elements.append(auth_str)
+    if defaultsort_str:
+        footer_elements.append(defaultsort_str)
+
+    if footer_elements:
+        final_text += "\n\n" + "\n".join(footer_elements)
+
+    if unique_cats:
+        final_text += "\n\n" + "\n".join(unique_cats)
+
+    final_text = re.sub(r"\n{3,}", "\n\n", final_text)
+    return final_text
+
+
 class AIService:
     """
     AI-powered fact verification, discrepancy detection,
@@ -781,12 +974,13 @@ class AIService:
         Supports free Ollama local/API LLM, Gemini, or deterministic synthesizer fallback.
         """
         provider = (settings.AI_PROVIDER or "ollama").lower().strip()
+        res: Optional[Dict[str, Any]] = None
 
         # 1. Ollama (100% Free Local or Self-Hosted Open-Source LLM)
         if provider == "ollama":
             try:
                 logger.info(f"Generating draft for '{title}' using Ollama model '{settings.OLLAMA_MODEL}'...")
-                return await self._generate_with_ollama(
+                res = await self._generate_with_ollama(
                     title=title,
                     original_wikitext=original_wikitext,
                     sources=sources,
@@ -809,7 +1003,7 @@ class AIService:
 
             if self.api_key:
                 try:
-                    return await self._generate_with_gemini(
+                    res = await self._generate_with_gemini(
                         title=title,
                         original_wikitext=original_wikitext,
                         sources=sources,
@@ -821,14 +1015,41 @@ class AIService:
                     logger.warning(f"Notice: Gemini API returned ({e}). Proceeding seamlessly with built-in encyclopedic synthesizer.")
 
         # 3. Built-in 100% Free Rule-Based Synthesizer (Zero external AI cost or setup)
-        return self._generate_structured_fallback(
-            title=title,
-            original_wikitext=original_wikitext,
-            sources=sources,
-            wikidata_facts=wikidata_facts,
-            is_deceased=is_deceased,
-            research_context=research_context
-        )
+        if not res:
+            res = self._generate_structured_fallback(
+                title=title,
+                original_wikitext=original_wikitext,
+                sources=sources,
+                wikidata_facts=wikidata_facts,
+                is_deceased=is_deceased,
+                research_context=research_context
+            )
+
+        # Enforce the 7 Justapedia editorial rules across all generated drafts
+        if res and isinstance(res, dict) and res.get("generated_draft"):
+            b_year = None
+            d_year = None
+            raw_b = (res.get("facts") or {}).get("birth_date") or wikidata_facts.get("birth_date") or ((research_context or {}).get("wikipedia_infobox", {})).get("birth_date")
+            raw_d = (res.get("facts") or {}).get("death_date") or wikidata_facts.get("death_date") or ((research_context or {}).get("wikipedia_infobox", {})).get("death_date")
+            if raw_b:
+                m_b = re.search(r"\b(19\d\d|20\d\d)\b", str(raw_b))
+                if m_b:
+                    b_year = m_b.group(1)
+            if raw_d:
+                m_d = re.search(r"\b(19\d\d|20\d\d)\b", str(raw_d))
+                if m_d:
+                    d_year = m_d.group(1)
+
+            res["generated_draft"] = organize_article_structure_and_categories(
+                wikitext=res["generated_draft"],
+                title=title,
+                is_deceased=is_deceased,
+                birth_year=b_year,
+                death_year=d_year
+            )
+            res["generated_draft"] = convert_infobox_dates_to_plain_text(res["generated_draft"])
+
+        return res
 
     async def _generate_with_ollama(
         self,
@@ -872,6 +1093,12 @@ class AIService:
                 clean_json = fence_match.group(1).strip()
                 
             parsed = json.loads(clean_json)
+            if isinstance(parsed, dict) and parsed.get("generated_draft"):
+                parsed["generated_draft"] = organize_article_structure_and_categories(
+                    wikitext=parsed["generated_draft"],
+                    title=title,
+                    is_deceased=is_deceased
+                )
             return parsed
 
     @staticmethod
@@ -955,6 +1182,12 @@ class AIService:
         
         raw_text = response.text
         data = json.loads(raw_text)
+        if isinstance(data, dict) and data.get("generated_draft"):
+            data["generated_draft"] = organize_article_structure_and_categories(
+                wikitext=data["generated_draft"],
+                title=title,
+                is_deceased=is_deceased
+            )
         return data
 
     def _build_gemini_prompt(
@@ -1055,6 +1288,15 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
    - For example, when updating sections such as "Illness and death", introduce factual claims with verified source attribution (e.g. `According to reports in ''The New York Times'',<ref>{{cite news...}}</ref>...`).
    - Apply this referencing approach across ALL sections that require updates, not just the infobox (Lead, Early life, Career updates, Illness and death, Posthumous developments, Legacy and tributes).
    - Ensure every factual claim is supported by reliable sources, all references are properly formatted with standard MediaWiki citation templates, and the article is comprehensive, accurate, and well-organized following Wikipedia edit guidelines.
+
+9. STRICT SECTION PLACEMENT, CATEGORY PLACEMENT & DEDUPLICATION MANDATE (THE 7 JUSTAPEDIA RULES):
+   - Rule 1 (Section placement): Add ALL relevant new sections, such as "Illness and death", "Posthumous developments", "Legacy and tributes", and "Career", strictly BEFORE the References section (`== References ==\n{{reflist}}`). Never put any article content sections after References.
+   - Rule 2 (Category placement): If categories exist in the References section or anywhere in the body, remove them and place them exclusively in the designated category area at the VERY BOTTOM of the article, not anywhere else.
+   - Rule 3 (Avoid duplicate categories): If a category is already present, do not add it again. Check case-insensitively. Remove contradictory living categories (such as [[Category:Living people]]) for deceased subjects. Add birth and death categories ([[Category:YYYY births]], [[Category:YYYY deaths]]).
+   - Rule 4 (Avoid repetitive information): Do not repeat the same facts, details, or content across multiple sections. Each piece of information should appear in the most appropriate section (Lead, Career, Illness and death, Legacy and tributes).
+   - Rule 5 (Add new information only): Review the article for missing or outdated information and add relevant new details supported by reliable sources and proper references.
+   - Rule 6 (Preserve existing content): Do not unnecessarily duplicate or rewrite information that is already accurate and adequately covered.
+   - Rule 7 (References): Ensure that all newly added information is supported by reliable sources, with the appropriate citations placed before the References section.
 
 SUBJECT DETAILS:
 - Subject: {title}
@@ -1267,28 +1509,18 @@ In a retrospective essay for ''The Hollywood Reporter'',<ref>{{cite web |last=Un
 
             summary = f"Rule-based revision: formatted according to Justapedia and American English conventions, updated all infobox template fields from Wikipedia/Wikidata, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added birth and death categories."
 
-        # 4. Categories: Remove Living people, add death year categories AND birth year category
-        if is_deceased:
-            draft = re.sub(r"\[\[Category:Living people\]\]\n?", "", draft, flags=re.IGNORECASE)
-            draft = re.sub(r"\[\[Category:Living persons\]\]\n?", "", draft, flags=re.IGNORECASE)
-            if death_year:
-                death_cat_1 = f"[[Category:{death_year} deaths]]"
-                death_cat_2 = f"[[Category:Deaths in {death_year}]]"
-                if death_cat_1 not in draft:
-                    draft += f"\n{death_cat_1}"
-                if death_cat_2 not in draft:
-                    draft += f"\n{death_cat_2}"
+        # 4. Strictly organize article structure and categories per the 7 Justapedia rules:
+        # Places all content sections before References, extracts categories from references/body,
+        # places them in the designated bottom category area, and deduplicates.
+        draft = organize_article_structure_and_categories(
+            wikitext=draft,
+            title=title,
+            is_deceased=is_deceased,
+            birth_year=birth_year,
+            death_year=death_year
+        )
 
-        if birth_year:
-            birth_cat = f"[[Category:{birth_year} births]]"
-            if birth_cat not in draft:
-                draft += f"\n{birth_cat}"
-
-        # 5. Ensure References section exists and is properly formatted with {{reflist}}
-        if "== references ==" not in draft.lower() and "{{reflist" not in draft.lower():
-            draft += "\n\n== References ==\n{{reflist}}\n"
-
-        # 6. Update short description
+        # 5. Update short description (never removes it)
         draft = update_short_description(
             draft,
             title,
@@ -1297,7 +1529,7 @@ In a retrospective essay for ''The Hollywood Reporter'',<ref>{{cite web |last=Un
             default_role=(wiki_infobox.get("occupation") or ", ".join(wikidata_facts.get("occupations", [])[:2])).capitalize() or "Subject"
         )
 
-        # 7. Final guarantee: convert any birth/death date templates to plain text American format
+        # 6. Final guarantee: convert any birth/death date templates to plain text American format
         draft = convert_infobox_dates_to_plain_text(draft)
 
         facts = {
