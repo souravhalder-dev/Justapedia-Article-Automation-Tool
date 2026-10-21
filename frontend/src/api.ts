@@ -78,12 +78,12 @@ export const api = {
   },
 
   // Discovery
-  async discoverDeceased(category_name?: string, limit: number = 20, filter_incomplete_only: boolean = true): Promise<ArticleJob[]> {
+  async discoverDeceased(category_name?: string, limit: number = 50, filter_incomplete_only: boolean = true): Promise<ArticleJob[]> {
     const res = await fetch(`${BASE_URL}/api/discovery/deceased`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        category_name: category_name || 'Category:Deaths in 2024',
+        category_name: category_name || 'Category:2024 deaths',
         limit,
         filter_incomplete_only
       })

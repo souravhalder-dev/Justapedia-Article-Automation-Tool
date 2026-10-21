@@ -17,8 +17,8 @@ export const DiscoveryBar: React.FC<DiscoveryBarProps> = ({
   const [activeTab, setActiveTab] = useState<'deceased' | 'category' | 'specific'>('deceased');
   
   // Deceased Mode States
-  const [deceasedCategory, setDeceasedCategory] = useState<string>('Category:Deaths in 2024');
-  const [deceasedLimit, setDeceasedLimit] = useState<number>(15);
+  const [deceasedCategory, setDeceasedCategory] = useState<string>('Category:2024 deaths');
+  const [deceasedLimit, setDeceasedLimit] = useState<number>(50);
   const [deceasedIncompleteOnly, setDeceasedIncompleteOnly] = useState<boolean>(true);
 
   // Category Mode States
@@ -99,7 +99,7 @@ export const DiscoveryBar: React.FC<DiscoveryBarProps> = ({
           <form onSubmit={handleDeceasedSubmit} className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Quick Year Categories:</span>
-              {['Deaths in 2025', 'Deaths in 2024', 'Deaths in 2023', 'Deaths in 2022'].map((preset) => (
+              {['2024 deaths', '2023 deaths', '2025 deaths', '2022 deaths'].map((preset) => (
                 <button
                   key={preset}
                   type="button"
@@ -116,7 +116,7 @@ export const DiscoveryBar: React.FC<DiscoveryBarProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-              <div className="md:col-span-6">
+              <div className="md:col-span-5">
                 <label className="block text-xs font-medium text-slate-700 mb-1">
                   Justapedia Death Category
                 </label>
@@ -124,7 +124,7 @@ export const DiscoveryBar: React.FC<DiscoveryBarProps> = ({
                   type="text"
                   value={deceasedCategory}
                   onChange={(e) => setDeceasedCategory(e.target.value)}
-                  placeholder="e.g. Category:Deaths in 2024"
+                  placeholder="e.g. Category:2024 deaths"
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 />
               </div>
@@ -142,18 +142,19 @@ export const DiscoveryBar: React.FC<DiscoveryBarProps> = ({
                   <option value={20}>20 articles</option>
                   <option value={35}>35 articles</option>
                   <option value={50}>50 articles</option>
+                  <option value={100}>100 articles</option>
                 </select>
               </div>
 
-              <div className="md:col-span-2 flex items-center h-10">
-                <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer">
+              <div className="md:col-span-3 flex items-center h-10">
+                <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer font-medium">
                   <input
                     type="checkbox"
                     checked={deceasedIncompleteOnly}
                     onChange={(e) => setDeceasedIncompleteOnly(e.target.checked)}
                     className="rounded text-sky-600 focus:ring-sky-500"
                   />
-                  <span>Prioritize Gaps & Stubs</span>
+                  <span>Only Articles Needing Updates (Death, Birth, Gaps)</span>
                 </label>
               </div>
 
@@ -169,7 +170,7 @@ export const DiscoveryBar: React.FC<DiscoveryBarProps> = ({
               </div>
             </div>
             <p className="text-xs text-slate-500">
-              Scans Justapedia for deceased people whose articles lack death dates, missing causes of death, lack biographical infoboxes, or have outdated living categories.
+              Scans Justapedia for up to your requested limit of articles needing updates (missing death/birth dates, causes/places of death, living category contradictions, or stubs). Complete and already-saved articles are skipped.
             </p>
           </form>
         )}

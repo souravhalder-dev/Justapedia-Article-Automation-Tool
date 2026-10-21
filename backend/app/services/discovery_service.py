@@ -1,19 +1,23 @@
 import logging
+import re
+import json
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from .justapedia_client import justapedia_client
 from .article_analyzer import ArticleAnalyzer
 from ..models import ArticleJob
-import json
 
 logger = logging.getLogger(__name__)
 
 DECEASED_DEFAULT_CATEGORIES = [
-    "Category:Deaths in 2025",
+    "Category:2024 deaths",
     "Category:Deaths in 2024",
+    "Category:2023 deaths",
     "Category:Deaths in 2023",
-    "Category:Deaths in 2022"
+    "Category:2025 deaths",
+    "Category:Deaths in 2025",
+    "Category:2022 deaths"
 ]
 
 class DiscoveryService:
@@ -25,26 +29,113 @@ class DiscoveryService:
     """
 
     @staticmethod
+    def is_list_or_meta_page(title: str) -> bool:
+        """Filter out list articles, timelines, indexes, and internal mediawiki pages."""
+        lower = title.lower().strip()
+        prefixes = (
+            "deaths in ",
+            "list of ",
+            "timeline of ",
+            "index of ",
+            "death and funeral of ",
+            "category:",
+            "template:",
+            "file:",
+            "wikipedia:",
+            "justapedia:",
+            "portal:",
+            "draft:"
+        )
+        return any(lower.startswith(p) for p in prefixes)
+
+    @staticmethod
+    def _build_deceased_categories(user_category: Optional[str]) -> List[str]:
+        """
+        Builds prioritized list of categories to scan for deceased individuals.
+        Handles year extraction, scanning both 'YYYY deaths' and 'Deaths in YYYY',
+        and cascading into adjacent years to ensure the user gets their requested target count.
+        """
+        if not user_category or not user_category.strip():
+            return list(DECEASED_DEFAULT_CATEGORIES)
+
+        raw = user_category.strip()
+        clean_cat = raw if raw.lower().startswith("category:") else f"Category:{raw}"
+
+        # Extract 4-digit year if present (e.g. 2024)
+        match = re.search(r"\b(19\d\d|20\d\d)\b", raw)
+        if match:
+            year = int(match.group(1))
+            cats = [
+                f"Category:{year} deaths",
+                f"Category:Deaths in {year}",
+                f"Category:{year - 1} deaths",
+                f"Category:Deaths in {year - 1}",
+                f"Category:{year + 1} deaths",
+                f"Category:Deaths in {year + 1}",
+                f"Category:{year - 2} deaths",
+                f"Category:Deaths in {year - 2}"
+            ]
+            if clean_cat not in cats:
+                cats.insert(0, clean_cat)
+            return cats
+
+        return [clean_cat] + list(DECEASED_DEFAULT_CATEGORIES)
+
+    @staticmethod
     async def discover_deceased(
         db: AsyncSession,
         categories: Optional[List[str]] = None,
-        limit_per_cat: int = 15,
+        limit_per_cat: int = 50,
         filter_incomplete_only: bool = True
     ) -> List[ArticleJob]:
-        cats = categories or DECEASED_DEFAULT_CATEGORIES
-        discovered_jobs: List[ArticleJob] = []
+        user_cat = categories[0] if (categories and len(categories) > 0) else None
+        cats_to_scan = DiscoveryService._build_deceased_categories(user_cat)
+        target_count = max(1, limit_per_cat)
 
-        for cat in cats:
-            try:
-                res = await justapedia_client.get_category_members(cat, limit=limit_per_cat)
+        discovered_jobs: List[ArticleJob] = []
+        seen_titles = set()
+
+        # Exclude articles already completed / saved by user
+        existing_saved_res = await db.execute(select(ArticleJob.title).where(ArticleJob.status == "saved"))
+        saved_titles = set(existing_saved_res.scalars().all())
+
+        for cat in cats_to_scan:
+            if len(discovered_jobs) >= target_count:
+                break
+
+            cmcontinue = None
+            pages_scanned = 0
+            max_pages = 25
+
+            while len(discovered_jobs) < target_count and pages_scanned < max_pages:
+                pages_scanned += 1
+                batch_limit = min(50, (target_count - len(discovered_jobs)) + 15)
+
+                try:
+                    res = await justapedia_client.get_category_members(cat, limit=batch_limit, cmcontinue=cmcontinue)
+                except Exception as e:
+                    logger.error(f"Error fetching members for {cat} (continue={cmcontinue}): {e}")
+                    break
+
                 members = res.get("members", [])
-                
+                if not members:
+                    break
+
                 for member in members:
-                    # Ignore Category: or File: sub-namespaces, focus on main article namespace (ns == 0)
+                    if len(discovered_jobs) >= target_count:
+                        break
+
+                    # ns == 0 indicates main encyclopedia namespace
                     if member.get("ns") != 0:
                         continue
-                    
-                    title = member.get("title")
+
+                    title = (member.get("title") or "").strip()
+                    if not title or DiscoveryService.is_list_or_meta_page(title):
+                        continue
+
+                    if title in seen_titles or title in saved_titles:
+                        continue
+
                     job = await DiscoveryService._process_and_store_article(
                         db=db,
                         title=title,
@@ -53,9 +144,12 @@ class DiscoveryService:
                         filter_incomplete_only=filter_incomplete_only
                     )
                     if job:
+                        seen_titles.add(title)
                         discovered_jobs.append(job)
-            except Exception as e:
-                logger.error(f"Error scanning category {cat}: {e}")
+
+                cmcontinue = res.get("continue")
+                if not cmcontinue:
+                    break
 
         await db.commit()
         return discovered_jobs
@@ -64,30 +158,66 @@ class DiscoveryService:
     async def discover_category(
         db: AsyncSession,
         category_name: str,
-        limit: int = 25,
+        limit: int = 50,
         filter_incomplete_only: bool = False
     ) -> List[ArticleJob]:
         cat = category_name.strip()
         if not cat.lower().startswith("category:"):
             cat = f"Category:{cat}"
 
-        res = await justapedia_client.get_category_members(cat, limit=limit)
-        members = res.get("members", [])
+        target_count = max(1, limit)
         discovered_jobs: List[ArticleJob] = []
+        seen_titles = set()
 
-        for member in members:
-            if member.get("ns") != 0:
-                continue
-            title = member.get("title")
-            job = await DiscoveryService._process_and_store_article(
-                db=db,
-                title=title,
-                mode="category",
-                category=cat,
-                filter_incomplete_only=filter_incomplete_only
-            )
-            if job:
-                discovered_jobs.append(job)
+        existing_saved_res = await db.execute(select(ArticleJob.title).where(ArticleJob.status == "saved"))
+        saved_titles = set(existing_saved_res.scalars().all())
+
+        cmcontinue = None
+        pages_scanned = 0
+        max_pages = 25
+
+        while len(discovered_jobs) < target_count and pages_scanned < max_pages:
+            pages_scanned += 1
+            batch_limit = min(50, (target_count - len(discovered_jobs)) + 15)
+
+            try:
+                res = await justapedia_client.get_category_members(cat, limit=batch_limit, cmcontinue=cmcontinue)
+            except Exception as e:
+                logger.error(f"Error scanning category {cat}: {e}")
+                break
+
+            members = res.get("members", [])
+            if not members:
+                break
+
+            for member in members:
+                if len(discovered_jobs) >= target_count:
+                    break
+
+                if member.get("ns") != 0:
+                    continue
+
+                title = (member.get("title") or "").strip()
+                if not title or DiscoveryService.is_list_or_meta_page(title):
+                    continue
+
+                if title in seen_titles or title in saved_titles:
+                    continue
+
+                job = await DiscoveryService._process_and_store_article(
+                    db=db,
+                    title=title,
+                    mode="category",
+                    category=cat,
+                    filter_incomplete_only=filter_incomplete_only
+                )
+                if job:
+                    seen_titles.add(title)
+                    discovered_jobs.append(job)
+
+            cmcontinue = res.get("continue")
+            if not cmcontinue:
+                break
 
         await db.commit()
         return discovered_jobs
@@ -127,6 +257,10 @@ class DiscoveryService:
         result = await db.execute(stmt)
         existing_job = result.scalars().first()
 
+        # If article was already edited and saved/published, do not show it again
+        if existing_job and existing_job.status == "saved":
+            return None
+
         # Fetch current article from Justapedia
         wiki_data = await justapedia_client.get_article(title)
         exists = wiki_data.get("exists", False)
@@ -141,18 +275,25 @@ class DiscoveryService:
         priority = audit.get("priority", "medium")
         summary = audit.get("summary", "")
 
-        # Check if article is already complete / already done
-        critical_gaps = {"non_existent_page", "contradictory_living_category", "missing_death_date", "no_citations", "short_stub"}
-        has_critical_gap = any(f in critical_gaps for f in flags)
+        # Check if article has any biographical/editorial update gaps
+        update_gaps = {
+            "non_existent_page",
+            "missing_death_date",
+            "missing_birth_date",
+            "contradictory_living_category",
+            "missing_death_cause",
+            "missing_death_place",
+            "missing_infobox",
+            "no_citations",
+            "short_stub"
+        }
+        has_update_gap = (not exists) or any(f in update_gaps for f in flags)
 
-        # If filtering for incomplete only and article is already complete/has no critical gaps
-        if filter_incomplete_only and not has_critical_gap and exists:
+        # If filtering for incomplete only and article is already complete/has no update gaps, skip it
+        if filter_incomplete_only and not has_update_gap:
             return None
 
         if existing_job:
-            # If article was already edited and saved/published, do not show it again
-            if existing_job.status == "saved":
-                return None
             # Update existing record
             existing_job.page_exists = exists
             existing_job.original_wikitext = wikitext
