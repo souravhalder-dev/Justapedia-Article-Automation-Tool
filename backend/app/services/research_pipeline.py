@@ -44,11 +44,11 @@ class ResearchPipeline:
             # 2. Query Wikidata API for confirmed structured dates and attributes
             wikidata = await self._fetch_wikidata(client, title)
 
-            # 3. Targeted web searches for death, cause, career, and tributes
+            # 3. Targeted web searches for death, cause, career, funeral, and posthumous developments
             search_queries = [
                 f"{title} obituary death date cause",
-                f"{title} tributes legacy career",
-                f"{title} biography birth date"
+                f"{title} funeral memorial posthumous tributes",
+                f"{title} biography career life"
             ]
             if "duvall" in title.lower():
                 search_queries.append(f"{title} The Forest Hills return to acting 2023 Blanco Texas")
@@ -112,13 +112,13 @@ class ResearchPipeline:
                     }
 
                     # Extract Death section
-                    m_death = re.search(r"==\s*(?:Death|Illness and death|Death and legacy)\s*==([\s\S]*?)(?:==|\Z)", full_wikitext, re.IGNORECASE)
+                    m_death = re.search(r"==\s*(?:Death|Illness and death|Death and legacy|Later life and death|Funeral and memorial)\s*==([\s\S]*?)(?:==|\Z)", full_wikitext, re.IGNORECASE)
                     if m_death:
                         clean_death = self._clean_wikitext(m_death.group(1))
                         result["death_section"] = clean_death
                     
                     # Extract Legacy section
-                    m_legacy = re.search(r"==\s*(?:Legacy|Legacy and tributes|Tributes)\s*==([\s\S]*?)(?:==|\Z)", full_wikitext, re.IGNORECASE)
+                    m_legacy = re.search(r"==\s*(?:Legacy|Legacy and tributes|Tributes|Posthumous honors|Posthumous recognition)\s*==([\s\S]*?)(?:==|\Z)", full_wikitext, re.IGNORECASE)
                     if m_legacy:
                         clean_legacy = self._clean_wikitext(m_legacy.group(1))
                         result["legacy_section"] = clean_legacy

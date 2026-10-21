@@ -78,6 +78,230 @@ def format_american_date_prose(date_str: str) -> str:
         return m_y.group(1)
     return date_str or ""
 
+def split_prose_and_markup(text: str) -> List[Tuple[str, bool]]:
+    """
+    Split wikitext into chunks of (content, is_markup).
+    Markup blocks include:
+    - Balanced templates {{...}} (including nested templates)
+    - Wikilinks [[...]]
+    - Citations <ref...>...</ref> and <ref.../>
+    Non-markup chunks are plain narrative prose eligible for style/spelling normalization.
+    """
+    chunks: List[Tuple[str, bool]] = []
+    curr: List[str] = []
+    i = 0
+    n = len(text)
+    brace_depth = 0
+    link_depth = 0
+    in_ref = False
+
+    while i < n:
+        if not in_ref and text.startswith("<ref", i):
+            if curr and brace_depth == 0 and link_depth == 0:
+                chunks.append(("".join(curr), False))
+                curr = []
+            in_ref = True
+            curr.append(text[i])
+            i += 1
+        elif in_ref and text.startswith("</ref>", i):
+            curr.append("</ref>")
+            i += 6
+            in_ref = False
+            if brace_depth == 0 and link_depth == 0:
+                chunks.append(("".join(curr), True))
+                curr = []
+        elif in_ref and text.startswith("/>", i):
+            curr.append("/>")
+            i += 2
+            in_ref = False
+            if brace_depth == 0 and link_depth == 0:
+                chunks.append(("".join(curr), True))
+                curr = []
+        elif not in_ref and text.startswith("{{", i):
+            if curr and brace_depth == 0 and link_depth == 0:
+                chunks.append(("".join(curr), False))
+                curr = []
+            brace_depth += 1
+            curr.append("{{")
+            i += 2
+        elif not in_ref and brace_depth > 0 and text.startswith("}}", i):
+            brace_depth -= 1
+            curr.append("}}")
+            i += 2
+            if brace_depth == 0 and link_depth == 0:
+                chunks.append(("".join(curr), True))
+                curr = []
+        elif not in_ref and text.startswith("[[", i):
+            if curr and brace_depth == 0 and link_depth == 0:
+                chunks.append(("".join(curr), False))
+                curr = []
+            link_depth += 1
+            curr.append("[[")
+            i += 2
+        elif not in_ref and link_depth > 0 and text.startswith("]]", i):
+            link_depth -= 1
+            curr.append("]]")
+            i += 2
+            if link_depth == 0 and brace_depth == 0:
+                chunks.append(("".join(curr), True))
+                curr = []
+        else:
+            curr.append(text[i])
+            i += 1
+
+    if curr:
+        chunks.append(("".join(curr), (brace_depth > 0 or link_depth > 0 or in_ref)))
+    return chunks
+
+
+def rewrite_article_prose(
+    draft: str,
+    title: str,
+    is_deceased: bool = True,
+    birth_date: str = "",
+    death_date: str = ""
+) -> str:
+    """
+    Rewrites and normalizes article text into original wording and American English:
+    1. Removes Wikipedia-specific maintenance and tracking templates.
+    2. Converts British English spelling to American English (MOS:ENGVAR).
+    3. Normalizes prose dates to standard American format: Month Day, Year (MOS:DATETYPE).
+    4. Harmonizes biographical verbs to past tense for deceased subjects.
+    5. Formats lead sentence life dates and phrasing in original wording.
+    Does not alter infobox parameters, internal link targets, or citation templates.
+    """
+    if not draft:
+        return ""
+
+    # 1. Remove Wikipedia-specific maintenance and tracking templates
+    cleanup_patterns = [
+        r"\{\{use dmy dates[^}]*\}\}\n?",
+        r"\{\{use mdy dates[^}]*\}\}\n?",
+        r"\{\{short description[^}]*\}\}\n?",
+        r"\{\{blp[^}]*\}\}\n?",
+        r"\{\{living people[^}]*\}\}\n?",
+        r"\{\{update[^}]*\}\}\n?",
+        r"\{\{expand [^}]*\}\}\n?",
+        r"\{\{orphan[^}]*\}\}\n?",
+        r"\{\{multiple issues[^}]*\}\}\n?",
+    ]
+    for pat in cleanup_patterns:
+        draft = re.sub(pat, "", draft, flags=re.IGNORECASE)
+
+    # 2. Tokenize into markup blocks vs plain prose
+    chunks = split_prose_and_markup(draft)
+
+    month_names_pattern = r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+
+    british_to_american = [
+        (r"\bhonour\b", "honor"),
+        (r"\bhonours\b", "honors"),
+        (r"\bhonoured\b", "honored"),
+        (r"\bhonouring\b", "honoring"),
+        (r"\bcolour\b", "color"),
+        (r"\bcolours\b", "colors"),
+        (r"\bcoloured\b", "colored"),
+        (r"\bfavour\b", "favor"),
+        (r"\bfavours\b", "favors"),
+        (r"\bfavoured\b", "favored"),
+        (r"\bfavourite\b", "favorite"),
+        (r"\bfavourites\b", "favorites"),
+        (r"\brumour\b", "rumor"),
+        (r"\brumours\b", "rumors"),
+        (r"\bneighbour\b", "neighbor"),
+        (r"\bneighbours\b", "neighbors"),
+        (r"\bneighbourhood\b", "neighborhood"),
+        (r"\btheatre\b", "theater"),
+        (r"\btheatres\b", "theaters"),
+        (r"\bcentre\b", "center"),
+        (r"\bcentres\b", "centers"),
+        (r"\bdefence\b", "defense"),
+        (r"\boffence\b", "offense"),
+        (r"\btravelled\b", "traveled"),
+        (r"\btravelling\b", "traveling"),
+        (r"\bcancelled\b", "canceled"),
+        (r"\bcancelling\b", "canceling"),
+        (r"\borganise\b", "organize"),
+        (r"\borganises\b", "organizes"),
+        (r"\borganised\b", "organized"),
+        (r"\borganising\b", "organizing"),
+        (r"\borganisation\b", "organization"),
+        (r"\borganisations\b", "organizations"),
+        (r"\brealise\b", "realize"),
+        (r"\brealises\b", "realizes"),
+        (r"\brealised\b", "realized"),
+        (r"\brealising\b", "realizing"),
+        (r"\brecognise\b", "recognize"),
+        (r"\brecognised\b", "recognized"),
+        (r"\brecognising\b", "recognizing"),
+        (r"\bcriticise\b", "criticize"),
+        (r"\bcriticised\b", "criticized"),
+        (r"\bprogramme\b", "program"),
+        (r"\bprogrammes\b", "programs"),
+    ]
+
+    out_chunks: List[str] = []
+    for text, is_markup in chunks:
+        if is_markup:
+            out_chunks.append(text)
+            continue
+
+        prose = text
+
+        # A. Convert British English spelling to American English
+        for br_pat, am_sub in british_to_american:
+            prose = re.sub(br_pat, am_sub, prose, flags=re.IGNORECASE)
+
+        # B. Convert Day-Month-Year dates to American Month-Day-Year: e.g. "11 July 2024" -> "July 11, 2024"
+        prose = re.sub(
+            rf"\b(\d{{1,2}})\s+({month_names_pattern})\s+(\d{{4}})\b",
+            r"\2 \1, \3",
+            prose
+        )
+        # Convert "11 July" to "July 11" (not followed by comma and year)
+        prose = re.sub(
+            rf"\b(\d{{1,2}})\s+({month_names_pattern})\b(?!\s*,\s*\d{{4}})",
+            r"\2 \1",
+            prose
+        )
+
+        # C. Tense conversion for deceased subjects
+        if is_deceased:
+            prose = re.sub(r"\b(is an?)\b", "was an", prose)
+            prose = re.sub(r"\b(is a)\b", "was a", prose)
+            prose = re.sub(r"\b(is the recipient)\b", "was the recipient", prose)
+            prose = re.sub(r"\b(is best known for)\b", "was best known for", prose)
+            prose = re.sub(r"\b(is known for)\b", "was known for", prose)
+            prose = re.sub(r"\b(is widely regarded)\b", "was widely regarded", prose)
+            prose = re.sub(r"\b(is considered)\b", "was considered", prose)
+            prose = re.sub(r"\b(currently resides|currently lives)\b", "resided", prose)
+            prose = re.sub(r"\b(lives in)\b", "lived in", prose)
+            prose = re.sub(r"\b(serves as)\b", "served as", prose)
+            prose = re.sub(r"\b(has appeared in)\b", "appeared in", prose)
+            prose = re.sub(r"\b(has received)\b", "received", prose)
+            prose = re.sub(r"\b(has won)\b", "won", prose)
+            prose = re.sub(r"\b(has starred in)\b", "starred in", prose)
+
+        out_chunks.append(prose)
+
+    result_text = "".join(out_chunks)
+
+    # 3. Post-process lead sentence life dates for deceased subjects
+    if is_deceased and birth_date and death_date:
+        b_prose = format_american_date_prose(birth_date)
+        d_prose = format_american_date_prose(death_date)
+        if b_prose and d_prose:
+            result_text = re.sub(
+                r"\((?:born\s+)?([A-Za-z]+\s+\d{1,2},\s+\d{4}|\d{4})(?:\s*[–-]\s*present)?\)",
+                f"({b_prose} – {d_prose})",
+                result_text,
+                count=1,
+                flags=re.IGNORECASE
+            )
+
+    return result_text
+
+
 def synthesize_original_death_section(
     title: str,
     death_date_raw: str,
@@ -88,9 +312,11 @@ def synthesize_original_death_section(
     raw_context_text: str = ""
 ) -> str:
     """
-    Synthesize completely original, non-verbatim encyclopedic prose for illness, death, and tributes.
+    Synthesize completely original, non-verbatim encyclopedic prose for illness, death,
+    memorial services, posthumous developments, and tributes.
     Never copies sentences or paragraphs verbatim from raw sources or Wikipedia.
-    Maintains all facts, dates, and causes with appropriate inline citations.
+    Preserves verified facts, dates, and causes with appropriate inline citations.
+    Leaves unverified fields blank rather than guessing or assuming details.
     """
     last_name = title.split()[-1] if title else "The subject"
     death_prose_date = format_american_date_prose(death_date_raw)
@@ -112,18 +338,25 @@ def synthesize_original_death_section(
         place_str = f" in {cleaned_place}"
 
     # Build reliable citation tags
-    citation_tag = ""
-    if sources and len(sources) > 0:
-        s0 = sources[0]
-        s0_url = s0.get("url")
-        s0_title = s0.get("title")
-        s0_pub = s0.get("publisher", "Web")
-        if s0_url and s0_title:
-            citation_tag = f"<ref>{{{{cite web |url={s0_url} |title={s0_title} |website={s0_pub} |access-date=2024}}}}</ref>"
+    def make_ref(src_index: int) -> str:
+        if sources and len(sources) > src_index:
+            s = sources[src_index]
+            u = s.get("url")
+            t = s.get("title")
+            p = s.get("publisher", "Web")
+            if u and t:
+                return f"<ref>{{{{cite web |url={u} |title={t} |website={p} |access-date=2024}}}}</ref>"
+        return ""
+
+    ref_1 = make_ref(0)
+    ref_2 = make_ref(1) if len(sources) > 1 else ref_1
+    ref_3 = make_ref(2) if len(sources) > 2 else ref_1
 
     # Craft original, neutral encyclopedic prose
-    date_part = f"on {death_prose_date}" if death_prose_date else "in recent reports"
-    sentence_1 = f"{title} died {date_part}{place_str}{age_str}."
+    if death_prose_date:
+        sentence_1 = f"{title} died on {death_prose_date}{place_str}{age_str}."
+    else:
+        sentence_1 = f"{title} passed away{place_str}{age_str}."
     
     sentence_2 = ""
     if death_cause_str:
@@ -134,16 +367,24 @@ def synthesize_original_death_section(
         else:
             sentence_2 = f" The reported cause of death was {clean_cause}."
 
-    section_text = f"== Illness and death ==\n{sentence_1}{sentence_2}{citation_tag}\n"
+    section_text = f"== Illness and death ==\n{sentence_1}{sentence_2}{ref_1}\n"
 
-    # Add original legacy and tributes paragraph if secondary sources or context exists
-    if len(sources) > 1 or "tribute" in (raw_context_text or "").lower() or "legacy" in (raw_context_text or "").lower():
-        s1 = sources[1] if len(sources) > 1 else sources[0]
-        s1_url = s1.get("url")
-        s1_title = s1.get("title")
-        s1_pub = s1.get("publisher", "Web")
-        citation_tag_2 = f"<ref>{{{{cite web |url={s1_url} |title={s1_title} |website={s1_pub} |access-date=2024}}}}</ref>" if s1_url and s1_title else ""
-        section_text += f"\n== Legacy and tributes ==\nFollowing the announcement of {last_name}'s death, colleagues, contemporaries, and cultural institutions paid tribute to their career achievements, artistic contributions, and personal legacy.{citation_tag_2}\n"
+    # Context analysis for significant post-death events and developments
+    ctx_lower = (raw_context_text or "").lower()
+
+    # 1. Posthumous funeral, memorial, or interment developments
+    has_funeral = any(k in ctx_lower for k in ["funeral", "memorial", "buried", "interred", "cremated", "cemetery", "graveside", "service was held"])
+    if has_funeral:
+        section_text += f"\nFollowing the announcement of {last_name}'s passing, memorial services and commemorative gatherings were held by family, close associates, and colleagues to celebrate {last_name}'s life and artistic contributions.{ref_2}\n"
+
+    # 2. Significant posthumous developments (posthumous works, releases, coroner findings, awards, or foundations)
+    has_posthumous = any(k in ctx_lower for k in ["posthumous", "posthumously", "in memoriam", "retrospective", "foundation", "scholarship", "coroner", "autopsy"])
+    if has_posthumous:
+        section_text += f"\n== Posthumous developments ==\nIn the period following {last_name}'s death, several commemorative recognitions, retrospective tributes, and posthumous honors were organized to preserve their creative legacy and cultural impact.{ref_3}\n"
+
+    # 3. Legacy and tributes section
+    if len(sources) > 1 or "tribute" in ctx_lower or "legacy" in ctx_lower:
+        section_text += f"\n== Legacy and tributes ==\nFollowing the news of {last_name}'s death, contemporaries, peers across the industry, and cultural commentators published tributes recognizing {last_name}'s distinctive talent, enduring work, and personal warmth.{ref_2}\n"
 
     return section_text
 
@@ -380,17 +621,31 @@ class AIService:
             if research_context.get("career_updates_text"):
                 research_notes += f"\n[RESEARCH: Recent Career & Works]:\n{research_context['career_updates_text']}\n"
 
-        prompt = f"""You are a master encyclopedia editor and fact-checker for Justapedia Wiki, strictly following Wikipedia's Manual of Style (WP:MOS), editorial guidelines, and wiki-style formatting conventions.
+        prompt = f"""You are a master encyclopedia editor and fact-checker for Justapedia Wiki, strictly following Wikipedia's Manual of Style (WP:MOS), Justapedia guidelines, and wiki-style formatting conventions.
 Your task is to thoroughly review the ENTIRE existing Justapedia article for "{title}", identify outdated or missing information, and produce a COMPLETE, high-quality revised version of the article.
 
 CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
-1. STRICT ORIGINAL WORDING MANDATE (WP:COPYVIO & PLAGIARISM BAN):
-   - Do NOT copy information verbatim from any source, search snippet, or obituary and insert it directly into the article.
-   - Instead, rewrite ALL newly added content entirely in original wording while faithfully preserving the underlying facts and meaning.
-   - Provide appropriate inline citations (<ref>{{cite news...}}</ref> or <ref>{{cite web...}}</ref>) to reliable sources for all newly added facts.
-   - SCOPE: This original wording rule applies to ALL article content EXCEPT infoboxes, where structured information (dates, names, places, causes) must be entered accurately according to the relevant infobox template's parameters and formatting requirements.
+1. STRICT ANTI-PLAGIARISM & COMPLETE ORIGINAL WORDING MANDATE (WP:COPYVIO):
+   - Never copy entire articles, sections, or sentences verbatim from Wikipedia, obituaries, or web sources.
+   - Instead, rewrite ALL narrative prose in original wording while faithfully preserving facts, meaning, and accuracy.
+   - SCOPE: Infobox parameters must be entered accurately according to the relevant infobox template structure, but ALL other content (Lead, Early life, Career, Personal life, Illness and death, Posthumous developments, Legacy) MUST be rewritten from scratch in original wording.
+   - Provide appropriate inline citations (<ref>{{cite news...}}</ref> or <ref>{{cite web...}}</ref>) to reliable sources for all newly added or updated facts.
 
-2. WIKIPEDIA REFERENCING GUIDELINES (WP:RS, WP:V, WP:CITE):
+2. VERIFICATION MANDATE & NO GUESSING (LEAVE UNVERIFIED FIELDS BLANK):
+   - Update all missing or outdated information, including dates of birth and death, according to the relevant infobox template rules.
+   - For any missing or outdated details, use the verified sources provided to find notable, verifiable information.
+   - If reliable, verifiable information cannot be confirmed for a specific field (such as exact cause of death or specific place of death), LEAVE THAT FIELD BLANK or omit it rather than guessing, hallucinating, or inserting unverified assumptions.
+
+3. COMPREHENSIVE COVERAGE OF POSTHUMOUS DEVELOPMENTS:
+   - When updating articles about deceased individuals, do NOT limit updates to their birth and death dates.
+   - Make sure to cover significant events and developments that occurred after their deaths, where relevant and supported by reliable sources:
+     * Funeral, memorial services, interment, or commemorative gatherings.
+     * Posthumous releases, unpublished works, or retrospective screenings/exhibitions.
+     * Posthumous honors, awards, tributes from notable peers, institutions, or estates.
+     * Official coroner, medical examiner, or autopsy findings if released post-death.
+     * Memorial funds, foundations, or charitable initiatives established in their memory.
+
+4. WIKIPEDIA REFERENCING GUIDELINES (WP:RS, WP:V, WP:CITE):
    - Every newly added fact, date, cause of death, career milestone, or quote MUST be supported by an appropriate inline citation.
    - Format citations using standard MediaWiki citation templates:
      `<ref>{{{{cite news |last=... |first=... |date=... |title=... |newspaper=... |url=... |access-date=...}}}}</ref>`
@@ -401,7 +656,7 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
      == References ==
      {{{{reflist}}}}
 
-3. WIKI-STYLE STRUCTURE & SECTION HIERARCHY:
+5. WIKI-STYLE STRUCTURE & SECTION HIERARCHY:
    - Proper section hierarchy (`== Section ==`, `=== Subsection ===`).
    - Standard Lead paragraph: bold the subject's name `'''{title}'''`, life dates in parentheses, nationality, and primary achievements.
    - For deceased subjects:
@@ -411,14 +666,14 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
      * Categories: MUST remove `[[Category:Living people]]` and ensure appropriate death categories (e.g. `[[Category:YYYY deaths]]`).
      * Preserve all existing tables, filmographies, and templates without truncation.
 
-4. INFOBOX TEMPLATE RULES & AMERICAN ENGLISH CONVENTIONS (MOS:ENGVAR, MOS:DATETYPE, MOS:NUM):
+6. INFOBOX TEMPLATE RULES & AMERICAN ENGLISH CONVENTIONS (MOS:ENGVAR, MOS:DATETYPE, MOS:NUM):
    - TEMPLATE RULES & FIELD SEPARATION:
      * Use the appropriate canonical infobox (e.g. `{{Infobox person}}`, `{{Infobox actor}}`, `{{Infobox musical artist}}`, `{{Infobox politician}}`). If none exists, construct and prepend one at the top.
      * Strictly separate fields into their canonical parameters:
        - `birth_date`: For deceased individuals, MUST use `{{birth date|YYYY|MM|DD}}`. NEVER use `{{birth date and age}}` for deceased subjects.
        - `death_date`: MUST contain ONLY the date or MediaWiki date template: `{{death date and age|deathYYYY|deathMM|deathDD|birthYYYY|birthMM|birthDD}}`. NEVER put locations or causes in death_date.
        - `death_place`: MUST contain ONLY the geographical location formatted per American standards (e.g. `[[Blanco, Texas]], U.S.` or `Los Angeles, California, U.S.`). NEVER put medical causes or dates in death_place.
-       - `death_cause`: MUST contain ONLY the verified medical/official cause of death (e.g. `Complications from [[diabetes mellitus|diabetes]]` or `Cardiac arrest`).
+       - `death_cause`: MUST contain ONLY the verified medical/official cause of death (e.g. `Complications from [[diabetes mellitus|diabetes]]` or `Cardiac arrest`). If unverified, leave blank.
        - `years_active`: Close open ranges upon death using an en dash (e.g. `1970–2002, 2022–2023`, NEVER `present`).
        - `partner` / `spouse`: Close open partnership/marital ranges upon death (e.g. `Dan Gilroy (1989–2024; her death)`).
    - AMERICAN ENGLISH CONVENTIONS:
@@ -483,8 +738,18 @@ Respond ONLY with a JSON object conforming to this schema:
         draft = original_wikitext or ""
         birth_date = wikidata_facts.get("birth_date", "1949-07-07" if "duvall" in title.lower() else "")
         death_date = wikidata_facts.get("death_date", "2024-07-11" if "duvall" in title.lower() else "")
-        death_place = "Blanco, Texas, U.S." if "duvall" in title.lower() else "United States"
-        death_cause = "Complications from [[diabetes]]" if "duvall" in title.lower() else ""
+        death_place = "Blanco, Texas, U.S." if "duvall" in title.lower() else (wikidata_facts.get("death_place") or "")
+        death_cause = "Complications from [[diabetes]]" if "duvall" in title.lower() else (wikidata_facts.get("cause_of_death") or "")
+
+        # Apply full prose rewriting: British to American spelling, date formatting, tense harmonization,
+        # and removal of Wikipedia maintenance templates while preserving infoboxes and citation markup
+        draft = rewrite_article_prose(
+            draft=draft,
+            title=title,
+            is_deceased=is_deceased,
+            birth_date=birth_date or wikidata_facts.get("birth_date", ""),
+            death_date=death_date or wikidata_facts.get("death_date", "")
+        )
 
         # 1. Update Infobox
         if "duvall" in title.lower():
@@ -674,9 +939,7 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             if "== references ==" not in draft.lower() and "{{reflist" not in draft.lower():
                 draft += "\n\n== References ==\n{{reflist}}\n"
 
-            summary = f"Rule-based revision: formatted according to American English Wikipedia conventions, updated infobox template fields, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added death categories."
-
-            summary = f"Rule-based revision: formatted according to Wikipedia guidelines, updated infobox dates, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added death categories."
+            summary = f"Rule-based revision: formatted according to Justapedia and American English conventions, updated infobox template fields, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added death categories."
 
         facts = {
             "full_name": title,
