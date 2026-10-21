@@ -2,10 +2,67 @@ import json
 import logging
 import re
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+def parse_date_components(date_str: str) -> Optional[Tuple[int, int, int]]:
+    """Parse YYYY-MM-DD or Month Day, Year into (year, month, day)."""
+    if not date_str:
+        return None
+    m_iso = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", str(date_str))
+    if m_iso:
+        return int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+    
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
+    }
+    m_us = re.search(r"([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})", str(date_str))
+    if m_us and m_us.group(1).lower() in months:
+        return int(m_us.group(3)), months[m_us.group(1).lower()], int(m_us.group(2))
+    return None
+
+def format_wiki_birth_date(birth_str: str, is_deceased: bool) -> str:
+    """Format birth date according to American English Wikipedia infobox rules."""
+    parts = parse_date_components(birth_str)
+    if parts:
+        y, m, d = parts
+        if is_deceased:
+            # Per MOS:DATE, {{birth date and age}} is never used for deceased subjects
+            return f"{{{{birth date|{y}|{m}|{d}}}}}"
+        else:
+            return f"{{{{birth date and age|{y}|{m}|{d}}}}}"
+    m_year = re.search(r"\b(19\d\d|20\d\d)\b", str(birth_str or ""))
+    if m_year:
+        return m_year.group(1)
+    return str(birth_str or "")
+
+def format_wiki_death_date(death_str: str, birth_str: str) -> str:
+    """Format death date according to American English Wikipedia infobox rules."""
+    d_parts = parse_date_components(death_str)
+    b_parts = parse_date_components(birth_str)
+    if d_parts and b_parts:
+        dy, dm, dd = d_parts
+        by, bm, bd = b_parts
+        return f"{{{{death date and age|{dy}|{dm}|{dd}|{by}|{bm}|{bd}}}}}"
+    elif d_parts:
+        dy, dm, dd = d_parts
+        return f"{{{{death date|{dy}|{dm}|{dd}}}}}"
+    m_year = re.search(r"\b(19\d\d|20\d\d)\b", str(death_str or ""))
+    if m_year:
+        return m_year.group(1)
+    return str(death_str or "")
+
+def format_american_location(loc_str: str) -> str:
+    """Format geographical location according to American standards (e.g. 'City, State, U.S.')."""
+    if not loc_str:
+        return ""
+    loc = loc_str.strip()
+    loc = re.sub(r",\s*(?:United States of America|United States|USA|US)\b", ", U.S.", loc, flags=re.IGNORECASE)
+    return loc
+
 
 class AIService:
     """
@@ -259,42 +316,31 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
      == References ==
      {{{{reflist}}}}
 
-3. WIKI-STYLE STRUCTURE & FORMATTING:
+3. WIKI-STYLE STRUCTURE & SECTION HIERARCHY:
    - Proper section hierarchy (`== Section ==`, `=== Subsection ===`).
    - Standard Lead paragraph: bold the subject's name `'''{title}'''`, life dates in parentheses, nationality, and primary achievements.
-   - Infobox at the top (`{{{{Infobox person}}}}` or domain infobox) with birth date, death date, death place, and cause of death.
    - For deceased subjects:
      * Convert verbs describing the subject from present tense ("is", "lives in") to past tense ("was", "lived in").
-     * Infobox: use `death_date = {{{{death date and age|deathYYYY|deathMM|deathDD|birthYYYY|birthMM|birthDD}}}}`.
      * Add or expand `=== Illness and death ===` or `== Death ==` with verified date, location, cause, and family/official statements in original wording.
      * Add `== Legacy and tributes ==` documenting public and industry tributes.
      * Categories: MUST remove `[[Category:Living people]]` and ensure appropriate death categories (e.g. `[[Category:YYYY deaths]]`).
      * Preserve all existing tables, filmographies, and templates without truncation.
 
-3. CAREER EXPANSION:
-   - Include all notable later work (e.g. for Shelley Duvall, her return to acting in the 2023 film 'The Forest Hills' after a 20-year hiatus).
-
-4. PERSONAL LIFE, ILLNESS AND DEATH:
-   - Audit personal life to reflect past tense where appropriate.
-   - Add or expand a dedicated '=== Illness and death ===' section:
-     Document date of death, place of death, hospice care, cause of death (e.g. complications of diabetes), and official announcements (e.g. partner Dan Gilroy's statement to The Hollywood Reporter).
-
-5. LEGACY AND TRIBUTES:
-   - Add a '== Legacy and tributes ==' section documenting public and industry tributes following her passing (e.g. tributes from Stephen King, Lee Unkrich, Scott Goldberg, Cannes Film Festival, Academy of Motion Picture Arts and Sciences).
-
-6. GRAMMAR & TENSE AUDIT ACROSS THE ENTIRE ARTICLE:
-   - Convert all present-tense verbs describing the deceased subject ("is", "lives in Blanco", "has been in a relationship") to past tense ("was", "lived in Blanco", "was in a relationship").
-
-7. PRESERVE FULL ARTICLE STRUCTURE:
-   - Preserve all existing filmography tables, discography, awards tables, and templates. Do NOT truncate or drop sections.
-
-8. CITATIONS & VERIFIABILITY:
-   - Incorporate inline <ref>{{{{cite news |...}}}}</ref> and <ref>{{{{cite web |...}}}}</ref> citations from reliable sources (The Hollywood Reporter, The New York Times, AP News, Variety, Deadline, TODAY.com).
-   - Only include verifiable facts from reliable sources.
-
-9. CATEGORIES:
-   - Remove '[[Category:Living people]]'.
-   - Ensure proper death categories (e.g. '[[Category:Deaths in 2024]]').
+4. INFOBOX TEMPLATE RULES & AMERICAN ENGLISH CONVENTIONS (MOS:ENGVAR, MOS:DATETYPE, MOS:NUM):
+   - TEMPLATE RULES & FIELD SEPARATION:
+     * Use the appropriate canonical infobox (e.g. `{{Infobox person}}`, `{{Infobox actor}}`, `{{Infobox musical artist}}`, `{{Infobox politician}}`). If none exists, construct and prepend one at the top.
+     * Strictly separate fields into their canonical parameters:
+       - `birth_date`: For deceased individuals, MUST use `{{birth date|YYYY|MM|DD}}`. NEVER use `{{birth date and age}}` for deceased subjects.
+       - `death_date`: MUST contain ONLY the date or MediaWiki date template: `{{death date and age|deathYYYY|deathMM|deathDD|birthYYYY|birthMM|birthDD}}`. NEVER put locations or causes in death_date.
+       - `death_place`: MUST contain ONLY the geographical location formatted per American standards (e.g. `[[Blanco, Texas]], U.S.` or `Los Angeles, California, U.S.`). NEVER put medical causes or dates in death_place.
+       - `death_cause`: MUST contain ONLY the verified medical/official cause of death (e.g. `Complications from [[diabetes mellitus|diabetes]]` or `Cardiac arrest`).
+       - `years_active`: Close open ranges upon death using an en dash (e.g. `1970–2002, 2022–2023`, NEVER `present`).
+       - `partner` / `spouse`: Close open partnership/marital ranges upon death (e.g. `Dan Gilroy (1989–2024; her death)`).
+   - AMERICAN ENGLISH CONVENTIONS:
+     * Dates in prose: Standard American English order: Month Day, Year (e.g. 'July 11, 2024', 'January 1, 1950'). Do NOT use day-first format ('11 July 2024').
+     * Locations: Standard American format 'City, State, U.S.' with period abbreviation.
+     * Spelling: Consistent American English spelling across the entire article (e.g. 'honor', 'color', 'defense', 'theater', 'center', 'traveled', 'program', 'organize', 'realize').
+     * Measurements: American customary units primary with metric conversions (e.g. '5 ft 8 in (1.73 m)').
 
 SUBJECT DETAILS:
 - Subject: {title}
@@ -433,25 +479,64 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
 
         else:
             # Generic rule-based encyclopedic synthesizer (Zero AI / LLM required)
-            death_date_val = wikidata_facts.get("death_date") or ""
-            death_year = death_date_val.split("-")[0] if "-" in death_date_val else ""
-            death_place_val = wikidata_facts.get("death_place") or ""
-            death_cause_val = wikidata_facts.get("cause_of_death") or ""
-            birth_date_val = wikidata_facts.get("birth_date") or ""
+            # Follows American English Wikipedia formatting conventions and infobox template rules
+            raw_death_date = wikidata_facts.get("death_date") or ""
+            raw_birth_date = wikidata_facts.get("birth_date") or ""
+            death_place_val = format_american_location(wikidata_facts.get("death_place") or "")
+            death_cause_val = (wikidata_facts.get("cause_of_death") or "").strip()
             
-            # 1. Update Infobox if birth_date or death_date exists and not in draft
-            infobox_insert = ""
-            if birth_date_val and "birth_date" not in draft.lower() and "birth-date" not in draft.lower():
-                infobox_insert += f"\n| birth_date         = {birth_date_val}"
-            if death_date_val and "death_date" not in draft.lower() and "death-date" not in draft.lower():
-                infobox_insert += f"\n| death_date         = {death_date_val}"
-                if death_place_val and "death_place" not in draft.lower():
-                    infobox_insert += f"\n| death_place        = {death_place_val}"
-                if death_cause_val and "death_cause" not in draft.lower() and "cause_of_death" not in draft.lower():
-                    infobox_insert += f"\n| death_cause        = {death_cause_val}"
+            # Format dates per American English Wikipedia templates
+            birth_date_val = format_wiki_birth_date(raw_birth_date, is_deceased=is_deceased) if raw_birth_date else ""
+            death_date_val = format_wiki_death_date(raw_death_date, raw_birth_date) if raw_death_date else ""
             
-            if infobox_insert and re.search(r"(\{\{Infobox[\s\S]*?)(\n\}\})", draft, re.IGNORECASE):
-                draft = re.sub(r"(\{\{Infobox[\s\S]*?)(\n\}\})", rf"\1{infobox_insert}\2", draft, count=1, flags=re.IGNORECASE)
+            # Extract death year for categories
+            d_parts = parse_date_components(raw_death_date)
+            death_year = str(d_parts[0]) if d_parts else ""
+            if not death_year and raw_death_date:
+                m_y = re.search(r"\b(19\d\d|20\d\d)\b", raw_death_date)
+                if m_y:
+                    death_year = m_y.group(1)
+
+            # 1. Update existing Infobox or construct a new standard Infobox person
+            has_existing_infobox = bool(re.search(r"\{\{Infobox", draft, re.IGNORECASE))
+
+            if has_existing_infobox:
+                # Convert living {{birth date and age}} to {{birth date}} for deceased subjects
+                if is_deceased:
+                    draft = re.sub(r"\{\{birth date and age\b", "{{birth date", draft, flags=re.IGNORECASE)
+
+                infobox_insert = ""
+                if birth_date_val and "birth_date" not in draft.lower() and "birth-date" not in draft.lower():
+                    infobox_insert += f"\n| birth_date         = {birth_date_val}"
+                if death_date_val and "death_date" not in draft.lower() and "death-date" not in draft.lower():
+                    infobox_insert += f"\n| death_date         = {death_date_val}"
+                    if death_place_val and "death_place" not in draft.lower():
+                        infobox_insert += f"\n| death_place        = {death_place_val}"
+                    if death_cause_val and "death_cause" not in draft.lower() and "cause_of_death" not in draft.lower():
+                        infobox_insert += f"\n| death_cause        = {death_cause_val}"
+
+                if infobox_insert and re.search(r"(\{\{Infobox[\s\S]*?)(\n\}\})", draft, re.IGNORECASE):
+                    draft = re.sub(r"(\{\{Infobox[\s\S]*?)(\n\}\})", rf"\1{infobox_insert}\2", draft, count=1, flags=re.IGNORECASE)
+            else:
+                # Construct proper American English {{Infobox person}} from scratch
+                infobox_lines = [
+                    "{{Infobox person",
+                    f"| name               = {title}",
+                ]
+                if birth_date_val:
+                    infobox_lines.append(f"| birth_date         = {birth_date_val}")
+                if death_date_val:
+                    infobox_lines.append(f"| death_date         = {death_date_val}")
+                if death_place_val:
+                    infobox_lines.append(f"| death_place        = {death_place_val}")
+                if death_cause_val:
+                    infobox_lines.append(f"| death_cause        = {death_cause_val}")
+                occupations = wikidata_facts.get("occupations") or []
+                if occupations:
+                    infobox_lines.append(f"| occupation         = {', '.join(occupations).capitalize()}")
+                infobox_lines.append("}}\n")
+                new_infobox_text = "\n".join(infobox_lines)
+                draft = f"{new_infobox_text}\n{draft.strip()}"
 
             # 2. Update lead tense from present to past for deceased individuals
             if is_deceased:
@@ -478,7 +563,6 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
                     citation_tags += f"<ref>{{{{cite web |url={s_url} |title={s_title} |website={s_pub} |access-date=2024}}}}</ref>"
 
             if citation_tags and "<ref" not in draft:
-                # Add to first paragraph or death section
                 if "== Illness and death ==" in draft:
                     draft = draft.replace("== Illness and death ==", f"== Illness and death ==\n{citation_tags}")
                 else:
@@ -501,6 +585,8 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
             # 6. Ensure References section exists and is properly formatted with {{reflist}}
             if "== references ==" not in draft.lower() and "{{reflist" not in draft.lower():
                 draft += "\n\n== References ==\n{{reflist}}\n"
+
+            summary = f"Rule-based revision: formatted according to American English Wikipedia conventions, updated infobox template fields, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added death categories."
 
             summary = f"Rule-based revision: formatted according to Wikipedia guidelines, updated infobox dates, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added death categories."
 
