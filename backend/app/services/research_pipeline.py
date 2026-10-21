@@ -24,6 +24,11 @@ class ResearchPipeline:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
+        self.wiki_headers = {
+            "User-Agent": "JustapediaEditorialBot/1.0 (https://justapedia.org; contact@justapedia.org)",
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
 
     async def research_subject(self, title: str, is_deceased_mode: bool = True) -> Dict[str, Any]:
         """
@@ -65,15 +70,17 @@ class ResearchPipeline:
                 "subject": title,
                 "sources": sources,
                 "wikidata_facts": wikidata,
+                "wikipedia_infobox": wiki_full.get("wikipedia_infobox", {}),
                 "wikipedia_summary": wiki_full.get("lead_summary", ""),
                 "full_wikipedia_text": wiki_full.get("full_text", ""),
                 "death_section_text": wiki_full.get("death_section", ""),
                 "legacy_section_text": wiki_full.get("legacy_section", ""),
-                "career_updates_text": wiki_full.get("career_updates", "")
+                "career_updates_text": wiki_full.get("career_updates", ""),
+                "career_section_text": wiki_full.get("career_section_text", "")
             }
 
     async def _fetch_wikipedia_full_content(self, client: httpx.AsyncClient, title: str) -> Dict[str, Any]:
-        """Fetch full Wikipedia article wikitext, sections, and extracted references."""
+        """Fetch full Wikipedia article wikitext, sections, infobox parameters, and extracted references."""
         result = {
             "lead_summary": "",
             "lead_source": None,
@@ -81,11 +88,13 @@ class ResearchPipeline:
             "death_section": "",
             "legacy_section": "",
             "career_updates": "",
+            "career_section_text": "",
+            "wikipedia_infobox": {},
             "extracted_references": []
         }
         try:
             url = f"https://en.wikipedia.org/w/api.php?action=query&prop=revisions|extracts&titles={quote_plus(title)}&rvprop=content&rvslots=main&exintro=1&explaintext=1&format=json"
-            resp = await client.get(url)
+            resp = await client.get(url, headers=self.wiki_headers)
             if resp.status_code != 200:
                 return result
             data = resp.json()
@@ -111,6 +120,9 @@ class ResearchPipeline:
                         "is_verified": True
                     }
 
+                    # Extract Wikipedia infobox
+                    result["wikipedia_infobox"] = self._extract_wikipedia_infobox(full_wikitext)
+
                     # Extract Death section
                     m_death = re.search(r"==\s*(?:Death|Illness and death|Death and legacy|Later life and death|Funeral and memorial)\s*==([\s\S]*?)(?:==|\Z)", full_wikitext, re.IGNORECASE)
                     if m_death:
@@ -122,6 +134,11 @@ class ResearchPipeline:
                     if m_legacy:
                         clean_legacy = self._clean_wikitext(m_legacy.group(1))
                         result["legacy_section"] = clean_legacy
+
+                    # Extract Career section
+                    m_career = re.search(r"==\s*(?:Career|Life and career|Acting career|Career and works|Works|Professional career)\s*==([\s\S]*?)(?:==|\Z)", full_wikitext, re.IGNORECASE)
+                    if m_career:
+                        result["career_section_text"] = self._clean_wikitext(m_career.group(1))
 
                     # Extract career updates (e.g. The Forest Hills)
                     if "forest hills" in full_wikitext.lower():
@@ -138,12 +155,47 @@ class ResearchPipeline:
             logger.warning(f"Error fetching full Wikipedia content for {title}: {e}")
         return result
 
+    @staticmethod
+    def _extract_wikipedia_infobox(wikitext: str) -> Dict[str, str]:
+        """
+        Extract structured parameter key-value pairs from Wikipedia's infobox template.
+        Supports {{Infobox person}}, {{Infobox actor}}, {{Infobox musical artist}}, etc.
+        """
+        infobox: Dict[str, str] = {}
+        if not wikitext:
+            return infobox
+        
+        try:
+            import mwparserfromhell
+            parsed = mwparserfromhell.parse(wikitext)
+            for t in parsed.filter_templates():
+                t_name = str(t.name).strip().lower()
+                if "infobox" in t_name:
+                    infobox["_template_name"] = str(t.name).strip()
+                    for param in t.params:
+                        k = str(param.name).strip()
+                        v = str(param.value).strip()
+                        if k and v:
+                            # Clean comments
+                            clean_v = re.sub(r"<!--.*?-->", "", v, flags=re.DOTALL).strip()
+                            # Clean hlist / flatlist if simple
+                            m_hl = re.match(r"\{\{(?:hlist|flatlist|plainlist)\|(.*?)\}\}", clean_v, re.DOTALL | re.IGNORECASE)
+                            if m_hl:
+                                items = [i.strip().lstrip("*").strip() for i in m_hl.group(1).split("|") if i.strip() and "=" not in i]
+                                if items:
+                                    clean_v = ", ".join(items)
+                            infobox[k] = clean_v
+                    break
+        except Exception as e:
+            logger.warning(f"Error extracting Wikipedia infobox: {e}")
+        return infobox
+
     async def _fetch_wikidata(self, client: httpx.AsyncClient, title: str) -> Dict[str, Any]:
-        """Fetch structured birth/death dates, place of death, cause, and occupations from Wikidata."""
+        """Fetch structured birth/death dates, place of death, cause, resting place, and occupations from Wikidata."""
         facts: Dict[str, Any] = {}
         try:
             search_url = f"https://www.wikidata.org/w/api.php?action=wbsearchentities&search={quote_plus(title)}&language=en&format=json&limit=1"
-            resp = await client.get(search_url)
+            resp = await client.get(search_url, headers=self.wiki_headers)
             if resp.status_code != 200:
                 return facts
             data = resp.json()
@@ -156,7 +208,7 @@ class ResearchPipeline:
             facts["description"] = results[0].get("description", "")
 
             entity_url = f"https://www.wikidata.org/w/api.php?action=wbgetentities&ids={qid}&props=claims&format=json"
-            ent_resp = await client.get(entity_url)
+            ent_resp = await client.get(entity_url, headers=self.wiki_headers)
             if ent_resp.status_code == 200:
                 ent_data = ent_resp.json()
                 claims = ent_data.get("entities", {}).get(qid, {}).get("claims", {})
@@ -172,6 +224,64 @@ class ResearchPipeline:
                     dod = claims["P570"][0].get("mainsnak", {}).get("datavalue", {}).get("value", {}).get("time")
                     if dod:
                         facts["death_date"] = self._format_wikidata_time(dod)
+
+                # P1477: Birth name
+                if "P1477" in claims:
+                    bn = claims["P1477"][0].get("mainsnak", {}).get("datavalue", {}).get("value", {}).get("text")
+                    if bn:
+                        facts["birth_name"] = bn
+
+                # Collect Qids for claims needing label resolution
+                def _extract_qids(prop_key: str) -> List[str]:
+                    q_list = []
+                    for c in claims.get(prop_key, []):
+                        snak = c.get("mainsnak", {})
+                        if snak.get("datavalue", {}).get("type") == "wikibase-entityid":
+                            item_id = snak.get("datavalue", {}).get("value", {}).get("id")
+                            if item_id:
+                                q_list.append(item_id)
+                    return q_list
+
+                props_map = {
+                    "P19": "birth_place",
+                    "P20": "death_place",
+                    "P509": "cause_of_death",
+                    "P1196": "manner_of_death",
+                    "P119": "resting_place",
+                    "P27": "nationality",
+                    "P106": "occupations",
+                    "P26": "spouse",
+                    "P451": "partner"
+                }
+
+                all_qids = []
+                prop_qid_map = {}
+                for p_key, fact_name in props_map.items():
+                    qids = _extract_qids(p_key)
+                    if qids:
+                        prop_qid_map[fact_name] = qids
+                        all_qids.extend(qids)
+
+                # Batch resolve entity labels
+                if all_qids:
+                    unique_qids = list(dict.fromkeys(all_qids))[:40]
+                    lbl_url = f"https://www.wikidata.org/w/api.php?action=wbgetentities&ids={'|'.join(unique_qids)}&props=labels&languages=en&format=json"
+                    lbl_resp = await client.get(lbl_url, headers=self.wiki_headers)
+                    if lbl_resp.status_code == 200:
+                        lbl_entities = lbl_resp.json().get("entities", {})
+                        label_dict = {
+                            qid_key: lbl_entities.get(qid_key, {}).get("labels", {}).get("en", {}).get("value")
+                            for qid_key in unique_qids
+                            if lbl_entities.get(qid_key, {}).get("labels", {}).get("en", {}).get("value")
+                        }
+
+                        for fact_name, q_list in prop_qid_map.items():
+                            resolved = [label_dict[q] for q in q_list if q in label_dict]
+                            if resolved:
+                                if fact_name in ("occupations",):
+                                    facts[fact_name] = resolved
+                                else:
+                                    facts[fact_name] = resolved[0]
 
         except Exception as e:
             logger.warning(f"Wikidata lookup error for {title}: {e}")

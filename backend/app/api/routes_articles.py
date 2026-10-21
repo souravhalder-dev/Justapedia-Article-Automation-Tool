@@ -151,10 +151,12 @@ async def research_article(
         job.status = "analyzed"
         job.researched_facts = json.dumps({
             "wikidata": research_result.get("wikidata_facts", {}),
+            "wikipedia_infobox": research_result.get("wikipedia_infobox", {}),
             "wikipedia_summary": research_result.get("wikipedia_summary", ""),
             "death_section_text": research_result.get("death_section_text", ""),
             "legacy_section_text": research_result.get("legacy_section_text", ""),
-            "career_updates_text": research_result.get("career_updates_text", "")
+            "career_updates_text": research_result.get("career_updates_text", ""),
+            "career_section_text": research_result.get("career_section_text", "")
         })
         await db.commit()
         await db.refresh(job)
@@ -205,7 +207,10 @@ async def generate_draft(
                 research_context = {
                     "death_section_text": parsed_facts.get("death_section_text", ""),
                     "legacy_section_text": parsed_facts.get("legacy_section_text", ""),
-                    "career_updates_text": parsed_facts.get("career_updates_text", "")
+                    "career_updates_text": parsed_facts.get("career_updates_text", ""),
+                    "career_section_text": parsed_facts.get("career_section_text", ""),
+                    "wikipedia_summary": parsed_facts.get("wikipedia_summary", ""),
+                    "wikipedia_infobox": parsed_facts.get("wikipedia_infobox", {})
                 }
             except Exception:
                 pass

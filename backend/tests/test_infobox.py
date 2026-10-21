@@ -291,3 +291,168 @@ async def test_original_wording_synthesis_no_verbatim_copy():
     
     # 3. Reliable inline citation must be attached before/alongside the factual statement
     assert "According to verified coverage in The Washington Post,<ref>{{cite web |url=https://example.com/pendelton-obit" in draft
+
+
+@pytest.mark.asyncio
+async def test_update_all_infobox_fields_from_wikipedia_and_wikidata():
+    """
+    Verifies that all missing infobox fields (birth info, birth name, birth place,
+    death date, death cause, death place, resting place, occupation, years active, partner)
+    are updated from Wikipedia & Wikidata info, with American plain text dates (no templates).
+    """
+    stub = """{{Short description|American actress}}
+{{Infobox person
+| name = Shelley Duvall
+| occupation = Actress
+}}
+'''Shelley Duvall''' is an actress.
+"""
+    wiki_infobox = {
+        "birth_name": "Shelley Alexis Duvall",
+        "birth_date": "{{birth date|1949|7|7}}",
+        "birth_place": "[[Fort Worth, Texas]], United States",
+        "death_date": "{{death date and age|2024|7|11|1949|7|7}}",
+        "death_place": "[[Blanco, Texas]], United States",
+        "death_cause": "Complications from [[diabetes mellitus|diabetes]]",
+        "resting_place": "Cremated; ashes scattered",
+        "occupation": "Actress, producer, writer",
+        "years_active": "1970–2002, 2022–present",
+        "partner": "[[Dan Gilroy (musician)|Dan Gilroy]] (1989–present)"
+    }
+    wikidata_facts = {
+        "birth_date": "1949-07-07",
+        "death_date": "2024-07-11",
+        "cause_of_death": "diabetes complications",
+        "occupations": ["actor", "producer"]
+    }
+    sources = [
+        {"url": "https://example.com/obit", "title": "Obituary", "publisher": "The Hollywood Reporter"}
+    ]
+
+    result = await ai_service.analyze_and_draft(
+        title="Shelley Duvall",
+        original_wikitext=stub,
+        sources=sources,
+        wikidata_facts=wikidata_facts,
+        is_deceased=True,
+        research_context={"wikipedia_infobox": wiki_infobox}
+    )
+    draft = result["generated_draft"]
+
+    # Verify all infobox fields are updated
+    assert "| birth_name = Shelley Alexis Duvall" in draft
+    assert "| birth_date = July 7, 1949" in draft
+    assert "{{birth date" not in draft
+    assert "| birth_place = [[Fort Worth, Texas]], U.S." in draft
+    assert "| death_date = July 11, 2024" in draft
+    assert "{{death date" not in draft
+    assert "| death_place = [[Blanco, Texas]], U.S." in draft
+    assert "| death_cause = Complications from [[diabetes mellitus|diabetes]]" in draft
+    assert "| resting_place = Cremated; ashes scattered" in draft
+    assert "| occupation = Actress, producer, writer" in draft
+    assert "1970–2002, 2022–2024" in draft or "1970–2002, 2022–2023" in draft
+    assert "–present" not in draft  # Range closed upon death
+
+
+@pytest.mark.asyncio
+async def test_update_both_birth_and_death_categories_and_remove_living_people():
+    """
+    Verifies that the updater updates BOTH birth and death categories
+    ([[Category:YYYY births]], [[Category:YYYY deaths]], [[Category:Deaths in YYYY]])
+    and removes [[Category:Living people]].
+    """
+    article_with_living_cat = """{{Infobox person
+| name = Gene Hackman
+| birth_date = January 30, 1930
+}}
+'''Eugene Allen Hackman''' is a retired American actor.
+[[Category:Living people]]
+"""
+    wikidata_facts = {
+        "birth_date": "1930-01-30",
+        "death_date": "2024-08-15",
+        "death_place": "Santa Fe, New Mexico, U.S.",
+        "cause_of_death": "natural causes"
+    }
+
+    result = await ai_service.analyze_and_draft(
+        title="Gene Hackman",
+        original_wikitext=article_with_living_cat,
+        sources=[{"url": "https://example.com/obit", "title": "Obit", "publisher": "Reuters"}],
+        wikidata_facts=wikidata_facts,
+        is_deceased=True
+    )
+    draft = result["generated_draft"]
+
+    # Must remove Living people
+    assert "[[Category:Living people]]" not in draft
+    # Must add death categories
+    assert "[[Category:2024 deaths]]" in draft
+    assert "[[Category:Deaths in 2024]]" in draft
+    # Must add birth category
+    assert "[[Category:1930 births]]" in draft
+
+
+@pytest.mark.asyncio
+async def test_article_analyzer_flags_cleared_after_full_update():
+    """
+    Verifies that an incomplete article with multiple audit flags
+    (missing death date, cause, place, contradictory living category,
+    missing birth date, short stub, missing career section) has ALL flags cleared
+    after being updated.
+    """
+    from app.services.article_analyzer import ArticleAnalyzer
+
+    initial_stub = """{{Infobox person
+| name = Arthur Pendelton
+}}
+'''Arthur Pendelton''' is an American writer.
+"""
+    cats = ["Category:2024 deaths", "Category:Living people"]
+    before = ArticleAnalyzer.analyze("Arthur Pendelton", initial_stub, cats)
+    
+    # Verify flags existed before update
+    assert "missing_death_date" in before["flags"]
+    assert "missing_death_cause" in before["flags"]
+    assert "missing_death_place" in before["flags"]
+    assert "contradictory_living_category" in before["flags"]
+    assert "missing_birth_date" in before["flags"]
+    assert "short_stub" in before["flags"]
+
+    wikidata_facts = {
+        "birth_date": "1940-05-12",
+        "death_date": "2024-03-15",
+        "death_place": "Austin, Texas, U.S.",
+        "cause_of_death": "cardiac arrest",
+        "occupations": ["novelist", "author"]
+    }
+    sources = [
+        {"url": "https://example.com/obit1", "title": "Obit 1", "publisher": "The Washington Post"},
+        {"url": "https://example.com/obit2", "title": "Obit 2", "publisher": "The New York Times"},
+        {"url": "https://example.com/obit3", "title": "Obit 3", "publisher": "Associated Press"}
+    ]
+
+    result = await ai_service.analyze_and_draft(
+        title="Arthur Pendelton",
+        original_wikitext=initial_stub,
+        sources=sources,
+        wikidata_facts=wikidata_facts,
+        is_deceased=True
+    )
+    draft = result["generated_draft"]
+
+    # Re-analyze updated wikitext
+    after = ArticleAnalyzer.analyze("Arthur Pendelton", draft, ["Category:2024 deaths", "Category:1940 births"])
+    
+    # All critical biographical flags must be resolved
+    assert "missing_death_date" not in after["flags"]
+    assert "missing_death_cause" not in after["flags"]
+    assert "missing_death_place" not in after["flags"]
+    assert "contradictory_living_category" not in after["flags"]
+    assert "missing_birth_date" not in after["flags"]
+    assert "short_stub" not in after["flags"]
+    assert "missing_career_section" not in after["flags"]
+    assert "few_citations" not in after["flags"]
+    assert "no_citations" not in after["flags"]
+    assert after["priority"] in ("low", "medium")
+
