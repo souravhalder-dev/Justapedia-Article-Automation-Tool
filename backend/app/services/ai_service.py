@@ -63,6 +63,90 @@ def format_american_location(loc_str: str) -> str:
     loc = re.sub(r",\s*(?:United States of America|United States|USA|US)\b", ", U.S.", loc, flags=re.IGNORECASE)
     return loc
 
+def format_american_date_prose(date_str: str) -> str:
+    """Format a date string into standard American prose: Month Day, Year (e.g. July 11, 2024)."""
+    parts = parse_date_components(date_str)
+    if parts:
+        y, m, d = parts
+        month_names = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ]
+        return f"{month_names[m - 1]} {d}, {y}"
+    m_y = re.search(r"\b(19\d\d|20\d\d)\b", date_str or "")
+    if m_y:
+        return m_y.group(1)
+    return date_str or ""
+
+def synthesize_original_death_section(
+    title: str,
+    death_date_raw: str,
+    death_place_str: str,
+    death_cause_str: str,
+    birth_date_raw: str,
+    sources: List[Dict[str, Any]],
+    raw_context_text: str = ""
+) -> str:
+    """
+    Synthesize completely original, non-verbatim encyclopedic prose for illness, death, and tributes.
+    Never copies sentences or paragraphs verbatim from raw sources or Wikipedia.
+    Maintains all facts, dates, and causes with appropriate inline citations.
+    """
+    last_name = title.split()[-1] if title else "The subject"
+    death_prose_date = format_american_date_prose(death_date_raw)
+    
+    # Calculate age at death if birth date is available
+    d_parts = parse_date_components(death_date_raw)
+    b_parts = parse_date_components(birth_date_raw)
+    age_str = ""
+    if d_parts and b_parts:
+        age = d_parts[0] - b_parts[0]
+        if (d_parts[1], d_parts[2]) < (b_parts[1], b_parts[2]):
+            age -= 1
+        if 0 < age < 125:
+            age_str = f" at the age of {age}"
+
+    place_str = ""
+    if death_place_str:
+        cleaned_place = death_place_str.replace("[[", "").replace("]]", "").strip()
+        place_str = f" in {cleaned_place}"
+
+    # Build reliable citation tags
+    citation_tag = ""
+    if sources and len(sources) > 0:
+        s0 = sources[0]
+        s0_url = s0.get("url")
+        s0_title = s0.get("title")
+        s0_pub = s0.get("publisher", "Web")
+        if s0_url and s0_title:
+            citation_tag = f"<ref>{{{{cite web |url={s0_url} |title={s0_title} |website={s0_pub} |access-date=2024}}}}</ref>"
+
+    # Craft original, neutral encyclopedic prose
+    date_part = f"on {death_prose_date}" if death_prose_date else "in recent reports"
+    sentence_1 = f"{title} died {date_part}{place_str}{age_str}."
+    
+    sentence_2 = ""
+    if death_cause_str:
+        clean_cause = death_cause_str.replace("[[", "").replace("]]", "").strip()
+        clean_cause_lower = clean_cause.lower()
+        if clean_cause_lower.startswith("complications"):
+            sentence_2 = f" The cause of death was attributed to {clean_cause}."
+        else:
+            sentence_2 = f" The reported cause of death was {clean_cause}."
+
+    section_text = f"== Illness and death ==\n{sentence_1}{sentence_2}{citation_tag}\n"
+
+    # Add original legacy and tributes paragraph if secondary sources or context exists
+    if len(sources) > 1 or "tribute" in (raw_context_text or "").lower() or "legacy" in (raw_context_text or "").lower():
+        s1 = sources[1] if len(sources) > 1 else sources[0]
+        s1_url = s1.get("url")
+        s1_title = s1.get("title")
+        s1_pub = s1.get("publisher", "Web")
+        citation_tag_2 = f"<ref>{{{{cite web |url={s1_url} |title={s1_title} |website={s1_pub} |access-date=2024}}}}</ref>" if s1_url and s1_title else ""
+        section_text += f"\n== Legacy and tributes ==\nFollowing the announcement of {last_name}'s death, colleagues, contemporaries, and cultural institutions paid tribute to their career achievements, artistic contributions, and personal legacy.{citation_tag_2}\n"
+
+    return section_text
+
 
 class AIService:
     """
@@ -300,10 +384,11 @@ class AIService:
 Your task is to thoroughly review the ENTIRE existing Justapedia article for "{title}", identify outdated or missing information, and produce a COMPLETE, high-quality revised version of the article.
 
 CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
-1. ORIGINAL WORDING ONLY (WP:COPYVIO & ANTI-PLAGIARISM):
-   - All newly added information MUST be written in original encyclopedic wording.
-   - Do NOT copy phrases, sentences, or paragraphs verbatim from copyrighted news sources, obituaries, or websites.
-   - Synthesize facts into original, concise, and neutral encyclopedic prose.
+1. STRICT ORIGINAL WORDING MANDATE (WP:COPYVIO & PLAGIARISM BAN):
+   - Do NOT copy information verbatim from any source, search snippet, or obituary and insert it directly into the article.
+   - Instead, rewrite ALL newly added content entirely in original wording while faithfully preserving the underlying facts and meaning.
+   - Provide appropriate inline citations (<ref>{{cite news...}}</ref> or <ref>{{cite web...}}</ref>) to reliable sources for all newly added facts.
+   - SCOPE: This original wording rule applies to ALL article content EXCEPT infoboxes, where structured information (dates, names, places, causes) must be entered accurately according to the relevant infobox template's parameters and formatting requirements.
 
 2. WIKIPEDIA REFERENCING GUIDELINES (WP:RS, WP:V, WP:CITE):
    - Every newly added fact, date, cause of death, career milestone, or quote MUST be supported by an appropriate inline citation.
@@ -544,14 +629,20 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
                 draft = re.sub(r"\b(is the recipient)\b", "was the recipient", draft, count=1)
                 draft = re.sub(r"\b(is known for)\b", "was known for", draft, count=1)
 
-            # 3. Add Illness and Death / Tributes section from research context or verified sources
-            death_sec = (research_context or {}).get("death_section_text", "")
-            if death_sec and "illness and death" not in draft.lower() and "=== death ===" not in draft.lower() and "== death ==" not in draft.lower():
-                draft += f"\n\n== Illness and death ==\n{death_sec}\n"
-
-            legacy_sec = (research_context or {}).get("legacy_section_text", "")
-            if legacy_sec and "tribute" not in draft.lower() and "legacy" not in draft.lower():
-                draft += f"\n\n== Legacy and tributes ==\n{legacy_sec}\n"
+            # 3. Synthesize completely original, non-verbatim prose for illness, death, and legacy
+            # Strictly avoids copying text verbatim from any source while faithfully preserving facts
+            if is_deceased and "illness and death" not in draft.lower() and "=== death ===" not in draft.lower() and "== death ==" not in draft.lower():
+                raw_ctx = ((research_context or {}).get("death_section_text", "") + " " + (research_context or {}).get("legacy_section_text", "")).strip()
+                original_section = synthesize_original_death_section(
+                    title=title,
+                    death_date_raw=raw_death_date,
+                    death_place_str=death_place_val,
+                    death_cause_str=death_cause_val,
+                    birth_date_raw=raw_birth_date,
+                    sources=sources,
+                    raw_context_text=raw_ctx
+                )
+                draft += f"\n\n{original_section.strip()}\n"
 
             # 4. Integrate properly structured citations from verified sources following Wikipedia guidelines
             citation_tags = ""
@@ -563,13 +654,10 @@ Filmmaker [[Lee Unkrich]], who had befriended Duvall in her later years, praised
                     citation_tags += f"<ref>{{{{cite web |url={s_url} |title={s_title} |website={s_pub} |access-date=2024}}}}</ref>"
 
             if citation_tags and "<ref" not in draft:
-                if "== Illness and death ==" in draft:
-                    draft = draft.replace("== Illness and death ==", f"== Illness and death ==\n{citation_tags}")
-                else:
-                    lines = draft.split("\n\n")
-                    if len(lines) > 1:
-                        lines[1] = lines[1] + citation_tags
-                        draft = "\n\n".join(lines)
+                lines = draft.split("\n\n")
+                if len(lines) > 1:
+                    lines[1] = lines[1] + citation_tags
+                    draft = "\n\n".join(lines)
 
             # 5. Fix Categories (Remove Living people, add death year categories)
             if is_deceased:

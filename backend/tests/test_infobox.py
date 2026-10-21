@@ -63,3 +63,44 @@ async def test_fallback_synthesizer_generates_infobox_with_american_conventions(
     assert "was an American actor" in draft
     # Check category updates
     assert "[[Category:2024 deaths]]" in draft
+
+@pytest.mark.asyncio
+async def test_original_wording_synthesis_no_verbatim_copy():
+    # Provide raw copyrighted text in research context
+    raw_copyrighted_source = "HE TRAGICALLY PERISHED FROM MASSIVE HEART COMPLICATIONS AFTER COLLAPSING AT HOME."
+    
+    wikidata_facts = {
+        "birth_date": "1940-05-12",
+        "death_date": "2024-03-15",
+        "death_place": "Austin, Texas, United States",
+        "cause_of_death": "cardiac arrest"
+    }
+    raw_article = "{{Infobox person\n| name = Arthur Pendelton\n}}\n'''Arthur Pendelton''' is an American writer."
+    
+    sources = [{
+        "url": "https://example.com/pendelton-obit",
+        "title": "Arthur Pendelton Obituary",
+        "publisher": "The Washington Post"
+    }]
+    
+    result = await ai_service.analyze_and_draft(
+        title="Arthur Pendelton",
+        original_wikitext=raw_article,
+        sources=sources,
+        wikidata_facts=wikidata_facts,
+        is_deceased=True,
+        research_context={"death_section_text": raw_copyrighted_source}
+    )
+    draft = result["generated_draft"]
+    
+    # 1. Verbatim raw copyrighted text must NEVER appear in the draft
+    assert raw_copyrighted_source not in draft
+    assert "HE TRAGICALLY PERISHED" not in draft
+    
+    # 2. Content must be synthesized in original wording with facts preserved
+    assert "== Illness and death ==" in draft
+    assert "died on March 15, 2024 in Austin, Texas, U.S. at the age of 83." in draft
+    assert "cause of death was cardiac arrest" in draft
+    
+    # 3. Reliable inline citation must be attached
+    assert "<ref>{{cite web |url=https://example.com/pendelton-obit" in draft
