@@ -66,11 +66,22 @@ export interface AppSettings {
   justapedia_bot_username: string;
   justapedia_has_password: boolean;
   justapedia_bot_password_masked: string;
+  ai_provider?: 'ollama' | 'rule_based' | 'gemini';
+  ollama_base_url?: string;
+  ollama_model?: string;
   gemini_has_key: boolean;
   gemini_key_masked: string;
   gemini_model: string;
   safe_test_mode: boolean;
   sandbox_page_title: string;
+}
+
+export interface OllamaTestResponse {
+  connected: boolean;
+  models: string[];
+  current_model: string;
+  base_url: string;
+  message: string;
 }
 
 export interface WikiTestConnectionResponse {

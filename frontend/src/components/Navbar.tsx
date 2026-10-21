@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppSettings, WikiTestConnectionResponse } from '../types';
-import { BookOpen, ShieldCheck, Settings as SettingsIcon, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { BookOpen, ShieldCheck, Settings as SettingsIcon, RefreshCw, CheckCircle2, AlertCircle, Cpu } from 'lucide-react';
 
 interface NavbarProps {
   settings: AppSettings | null;
@@ -58,6 +58,23 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </div>
 
+
+          {/* AI Engine Status Badge */}
+          <div 
+            onClick={onOpenSettings}
+            className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition-colors"
+            title="Click to configure Free AI / Ollama"
+          >
+            <Cpu className="w-3.5 h-3.5 text-sky-400" />
+            <span className="font-medium">
+              {settings?.ai_provider === 'rule_based' 
+                ? 'Rule-Based Synthesizer' 
+                : `Ollama (${settings?.ollama_model || 'llama3.2'})`}
+            </span>
+            <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+              FREE
+            </span>
+          </div>
 
           {/* Safe Mode Badge */}
           {settings?.safe_test_mode && (

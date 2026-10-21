@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
 from ..models import AppSetting
-from ..schemas import SettingsUpdate, WikiTestConnectionResponse
+from ..schemas import SettingsUpdate, WikiTestConnectionResponse, OllamaTestResponse
 from ..services.justapedia_client import justapedia_client
 from ..config import settings
 from ..services.ai_service import ai_service
@@ -25,6 +25,9 @@ async def get_settings():
         "justapedia_bot_username": settings.JUSTAPEDIA_BOT_USERNAME or "",
         "justapedia_has_password": bool(settings.JUSTAPEDIA_BOT_PASSWORD),
         "justapedia_bot_password_masked": mask_secret(settings.JUSTAPEDIA_BOT_PASSWORD or ""),
+        "ai_provider": settings.AI_PROVIDER,
+        "ollama_base_url": settings.OLLAMA_BASE_URL,
+        "ollama_model": settings.OLLAMA_MODEL,
         "gemini_has_key": bool(settings.GEMINI_API_KEY),
         "gemini_key_masked": mask_secret(settings.GEMINI_API_KEY or ""),
         "gemini_model": settings.GEMINI_MODEL,
@@ -47,6 +50,15 @@ async def update_settings(
         
     if payload.justapedia_bot_password is not None:
         settings.JUSTAPEDIA_BOT_PASSWORD = payload.justapedia_bot_password.strip()
+
+    if payload.ai_provider is not None:
+        settings.AI_PROVIDER = payload.ai_provider.strip().lower()
+
+    if payload.ollama_base_url is not None:
+        settings.OLLAMA_BASE_URL = payload.ollama_base_url.strip()
+
+    if payload.ollama_model is not None:
+        settings.OLLAMA_MODEL = payload.ollama_model.strip()
         
     if payload.gemini_api_key is not None:
         key = payload.gemini_api_key.strip()
@@ -70,6 +82,19 @@ async def update_settings(
         settings.SANDBOX_PAGE_TITLE = payload.sandbox_page_title.strip()
 
     return {"message": "Settings updated successfully"}
+
+@router.post("/test-ollama", response_model=OllamaTestResponse)
+async def test_ollama_connection(payload: dict = None):
+    """Verify live connectivity and list models from local or remote Ollama API."""
+    base_url = (payload or {}).get("base_url") or settings.OLLAMA_BASE_URL
+    res = await ai_service.test_ollama(base_url=base_url)
+    return OllamaTestResponse(
+        connected=res.get("connected", False),
+        models=res.get("models", []),
+        current_model=res.get("current_model", settings.OLLAMA_MODEL),
+        base_url=res.get("base_url", settings.OLLAMA_BASE_URL),
+        message=res.get("message", "")
+    )
 
 @router.post("/test-wiki", response_model=WikiTestConnectionResponse)
 async def test_wiki_connection():

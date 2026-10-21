@@ -85,10 +85,20 @@ class SettingsUpdate(BaseModel):
     justapedia_api_url: Optional[str] = None
     justapedia_bot_username: Optional[str] = None
     justapedia_bot_password: Optional[str] = None
+    ai_provider: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    ollama_model: Optional[str] = None
     gemini_api_key: Optional[str] = None
     gemini_model: Optional[str] = None
     safe_test_mode: Optional[bool] = None
     sandbox_page_title: Optional[str] = None
+
+class OllamaTestResponse(BaseModel):
+    connected: bool
+    models: List[str] = []
+    current_model: str = "llama3.2"
+    base_url: str = "http://localhost:11434"
+    message: str
 
 class WikiTestConnectionResponse(BaseModel):
     connected: bool

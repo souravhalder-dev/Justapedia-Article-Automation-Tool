@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     # Standard MediaWiki Request Headers (Realistic User-Agent to pass Cloudflare/WAF)
     USER_AGENT: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     
-    # AI / LLM Configuration
+    # AI / LLM Configuration (Free Ollama Local/API & Rule-Based Synthesizer)
+    AI_PROVIDER: str = "ollama"  # "ollama", "rule_based", "gemini"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.2"
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-3.8-flash"
     

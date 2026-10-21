@@ -1,4 +1,4 @@
-import { ArticleJob, AppSettings, WikiTestConnectionResponse, SaveToWikiResponse } from './types';
+import { ArticleJob, AppSettings, WikiTestConnectionResponse, SaveToWikiResponse, OllamaTestResponse } from './types';
 
 const BASE_URL = ''; // Relative path, handled by Vite proxy in dev or FastAPI in prod
 
@@ -150,6 +150,15 @@ export const api = {
   async testWikiConnection(): Promise<WikiTestConnectionResponse> {
     const res = await fetch(`${BASE_URL}/api/settings/test-wiki`, { method: 'POST' });
     return handleResponse<WikiTestConnectionResponse>(res);
+  },
+
+  async testOllamaConnection(baseUrl?: string): Promise<OllamaTestResponse> {
+    const res = await fetch(`${BASE_URL}/api/settings/test-ollama`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(baseUrl ? { base_url: baseUrl } : {})
+    });
+    return handleResponse<OllamaTestResponse>(res);
   },
 
   async loginWiki(payload: { username?: string; password?: string }): Promise<any> {

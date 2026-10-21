@@ -38,20 +38,15 @@ class AIService:
         Orchestrates full-article factual audit, discrepancy detection,
         tense updating, section expansion (death, return to acting, tributes),
         and complete Justapedia wikitext draft generation.
+        Supports free Ollama local/API LLM, Gemini, or deterministic synthesizer fallback.
         """
-        # Re-check API key from settings if not set
-        if not self.api_key and settings.GEMINI_API_KEY:
-            self.api_key = settings.GEMINI_API_KEY
-            try:
-                from google import genai
-                self.client = genai.Client(api_key=self.api_key)
-            except Exception as e:
-                logger.warning(f"Error initializing Gemini client: {e}")
+        provider = (settings.AI_PROVIDER or "ollama").lower().strip()
 
-        # If API key is present, use Gemini API
-        if self.api_key:
+        # 1. Ollama (100% Free Local or Self-Hosted Open-Source LLM)
+        if provider == "ollama":
             try:
-                return await self._generate_with_gemini(
+                logger.info(f"Generating draft for '{title}' using Ollama model '{settings.OLLAMA_MODEL}'...")
+                return await self._generate_with_ollama(
                     title=title,
                     original_wikitext=original_wikitext,
                     sources=sources,
@@ -60,9 +55,32 @@ class AIService:
                     research_context=research_context
                 )
             except Exception as e:
-                logger.warning(f"Notice: Gemini API returned ({e}). Proceeding seamlessly with built-in encyclopedic synthesizer.")
+                logger.warning(f"Notice: Ollama returned ({e}). Proceeding seamlessly with built-in encyclopedic synthesizer.")
 
-        # Fallback synthesizer
+        # 2. Gemini Cloud API (if configured and selected)
+        elif provider == "gemini":
+            if not self.api_key and settings.GEMINI_API_KEY:
+                self.api_key = settings.GEMINI_API_KEY
+                try:
+                    from google import genai
+                    self.client = genai.Client(api_key=self.api_key)
+                except Exception as e:
+                    logger.warning(f"Error initializing Gemini client: {e}")
+
+            if self.api_key:
+                try:
+                    return await self._generate_with_gemini(
+                        title=title,
+                        original_wikitext=original_wikitext,
+                        sources=sources,
+                        wikidata_facts=wikidata_facts,
+                        is_deceased=is_deceased,
+                        research_context=research_context
+                    )
+                except Exception as e:
+                    logger.warning(f"Notice: Gemini API returned ({e}). Proceeding seamlessly with built-in encyclopedic synthesizer.")
+
+        # 3. Built-in 100% Free Rule-Based Synthesizer (Zero external AI cost or setup)
         return self._generate_structured_fallback(
             title=title,
             original_wikitext=original_wikitext,
@@ -71,6 +89,100 @@ class AIService:
             is_deceased=is_deceased,
             research_context=research_context
         )
+
+    async def _generate_with_ollama(
+        self,
+        title: str,
+        original_wikitext: str,
+        sources: List[Dict[str, Any]],
+        wikidata_facts: Dict[str, Any],
+        is_deceased: bool,
+        research_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Call local or remote Ollama API with structured JSON output.
+        Zero cost, completely private, running open-source models like Llama 3.2, Mistral, Qwen 2.5.
+        """
+        import httpx
+        prompt = self._build_gemini_prompt(title, original_wikitext, sources, wikidata_facts, is_deceased, research_context)
+        
+        base_url = (settings.OLLAMA_BASE_URL or "http://localhost:11434").rstrip("/")
+        model = settings.OLLAMA_MODEL or "llama3.2"
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": 0.2
+            }
+        }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{base_url}/api/generate", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            raw_text = data.get("response", "")
+            
+            # Extract JSON cleanly (handles raw json or markdown wrapped ```json ... ```)
+            clean_json = raw_text.strip()
+            fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_json)
+            if fence_match:
+                clean_json = fence_match.group(1).strip()
+                
+            parsed = json.loads(clean_json)
+            return parsed
+
+    @staticmethod
+    async def test_ollama(base_url: Optional[str] = None) -> Dict[str, Any]:
+        """Verify Ollama connectivity and retrieve pulled models."""
+        import httpx
+        url = (base_url or settings.OLLAMA_BASE_URL or "http://localhost:11434").rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(f"{url}/api/tags")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = [m.get("name") for m in data.get("models", [])]
+                    current = settings.OLLAMA_MODEL or "llama3.2"
+                    has_current = current in models or any(m.startswith(current) for m in models)
+                    msg = f"Ollama is online! {len(models)} model(s) available."
+                    if not has_current and models:
+                        msg += f" Note: Configured model '{current}' is not in your downloaded list ({', '.join(models[:3])}). Run `ollama pull {current}`."
+                    elif not models:
+                        msg += " No models downloaded yet. Run `ollama pull llama3.2` in terminal."
+                    return {
+                        "connected": True,
+                        "models": models,
+                        "current_model": current,
+                        "base_url": url,
+                        "message": msg
+                    }
+                else:
+                    return {
+                        "connected": False,
+                        "models": [],
+                        "current_model": settings.OLLAMA_MODEL,
+                        "base_url": url,
+                        "message": f"Ollama returned HTTP status {resp.status_code}"
+                    }
+        except httpx.ConnectError:
+            return {
+                "connected": False,
+                "models": [],
+                "current_model": settings.OLLAMA_MODEL,
+                "base_url": url,
+                "message": f"Could not connect to Ollama at {url}. Make sure Ollama is installed and running (`ollama serve` or open the Ollama app)."
+            }
+        except Exception as e:
+            return {
+                "connected": False,
+                "models": [],
+                "current_model": settings.OLLAMA_MODEL,
+                "base_url": url,
+                "message": f"Ollama connection error: {str(e)}"
+            }
 
     async def _generate_with_gemini(
         self,

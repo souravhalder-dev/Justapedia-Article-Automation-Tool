@@ -390,6 +390,7 @@ export function App() {
         }}
         onTestWiki={api.testWikiConnection}
         onLoginWiki={api.loginWiki}
+        onTestOllama={api.testOllamaConnection}
       />
 
       {/* Batch Processing Interactive Modal */}
