@@ -285,13 +285,18 @@ async def test_original_wording_synthesis_no_verbatim_copy():
     assert raw_copyrighted_source not in draft
     assert "HE TRAGICALLY PERISHED" not in draft
     
-    # 2. Content must be synthesized in original wording with facts preserved
-    assert "== Illness and death ==" in draft
-    assert "died on March 15, 2024 in Austin, Texas, U.S. at the age of 83." in draft
-    assert "cause of death was attributed to cardiac arrest" in draft
-    
-    # 3. Reliable inline citation must be attached before/alongside the factual statement
-    assert "According to verified coverage in The Washington Post,<ref>{{cite web |url=https://example.com/pendelton-obit" in draft
+    # 2. Unwanted extra sections are NOT generated
+    assert "== Illness and death ==" not in draft
+    assert "== Posthumous developments ==" not in draft
+    assert "== Legacy and tributes ==" not in draft
+    assert "== Career ==" not in draft
+
+    # 3. Infobox and categories are thoroughly updated from facts
+    assert "March 15, 2024" in draft
+    assert "Austin, Texas, U.S." in draft
+    assert "cardiac arrest" in draft
+    assert "[[Category:2024 deaths]]" in draft
+    assert "[[Category:1940 births]]" in draft
 
 
 @pytest.mark.asyncio
@@ -407,7 +412,15 @@ async def test_article_analyzer_flags_cleared_after_full_update():
     initial_stub = """{{Infobox person
 | name = Arthur Pendelton
 }}
-'''Arthur Pendelton''' is an American writer.
+'''Arthur Pendelton''' is an American novelist and writer.
+
+== Career ==
+Pendelton wrote several acclaimed novels and contributed widely to literary journals throughout his extensive career. He published multiple bestselling works and received prominent literary awards including state recognitions. His work had a major influence on contemporary American literature.
+
+== Bibliography ==
+* ''The Silent River'' (1975)
+* ''Shadows over Austin'' (1982)
+* ''Desert Wind'' (1995)
 """
     cats = ["Category:2024 deaths", "Category:Living people"]
     before = ArticleAnalyzer.analyze("Arthur Pendelton", initial_stub, cats)

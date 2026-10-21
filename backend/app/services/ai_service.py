@@ -1227,14 +1227,15 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
    - For any missing or outdated details, use the verified sources provided to find notable, verifiable information.
    - If reliable, verifiable information cannot be confirmed for a specific field (such as exact cause of death or specific place of death), LEAVE THAT FIELD BLANK or omit it rather than guessing, hallucinating, or inserting unverified assumptions.
 
-3. COMPREHENSIVE COVERAGE OF POSTHUMOUS DEVELOPMENTS:
-   - When updating articles about deceased individuals, do NOT limit updates to their birth and death dates.
-   - Make sure to cover significant events and developments that occurred after their deaths, where relevant and supported by reliable sources:
-     * Funeral, memorial services, interment, or commemorative gatherings.
-     * Posthumous releases, unpublished works, or retrospective screenings/exhibitions.
-     * Posthumous honors, awards, tributes from notable peers, institutions, or estates.
-     * Official coroner, medical examiner, or autopsy findings if released post-death.
-     * Memorial funds, foundations, or charitable initiatives established in their memory.
+3. NO UNNECESSARY SECTIONS MANDATE:
+   - Do NOT generate or add 'Illness and death', 'Posthumous developments', 'Legacy and tributes', or 'Career' sections.
+   - The editorial task is strictly focused on:
+     * Updating Infobox parameters with verified birth/death info, locations, causes, occupations, and spouse/partner.
+     * Updating the Lead sentence life dates and converting verbs to past tense for deceased subjects.
+     * Updating {{short description}} with life years.
+     * Updating categories (adding birth/death year categories, removing Living people).
+     * Ensuring proper references and reflist placement.
+     * Preserving all existing article text, tables, and sections without injecting unwanted extra sections.
 
 4. WIKIPEDIA REFERENCING GUIDELINES (WP:RS, WP:V, WP:CITE):
    - Every newly added fact, date, cause of death, career milestone, or quote MUST be supported by an appropriate inline citation.
@@ -1252,8 +1253,7 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
    - Standard Lead paragraph: bold the subject's name `'''{title}'''`, life dates in parentheses, nationality, and primary achievements.
    - For deceased subjects:
      * Convert verbs describing the subject from present tense ("is", "lives in") to past tense ("was", "lived in").
-     * Add or expand `=== Illness and death ===` or `== Death ==` with verified date, location, cause, and family/official statements in original wording.
-     * Add `== Legacy and tributes ==` documenting public and industry tributes.
+     * Do NOT generate or add 'Illness and death', 'Posthumous developments', 'Legacy and tributes', or 'Career' sections. Focus updates strictly on Infobox, Lead life dates/past tense, Short description, Categories, and References.
      * Categories: MUST remove `[[Category:Living people]]` and ensure appropriate death categories (e.g. `[[Category:YYYY deaths]]`).
      * Preserve all existing tables, filmographies, and templates without truncation.
 
@@ -1285,15 +1285,15 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
 
 8. CITATION PLACEMENT MANDATE (BEFORE / ALONGSIDE SUPPORTED CONTENT):
    - Add reliable references BEFORE or alongside the content they support.
-   - For example, when updating sections such as "Illness and death", introduce factual claims with verified source attribution (e.g. `According to reports in ''The New York Times'',<ref>{{cite news...}}</ref>...`).
-   - Apply this referencing approach across ALL sections that require updates, not just the infobox (Lead, Early life, Career updates, Illness and death, Posthumous developments, Legacy and tributes).
+   - Add verified citations for all newly added or updated claims (<ref>{{cite ...}}</ref>) in the Lead or existing sections.
    - Ensure every factual claim is supported by reliable sources, all references are properly formatted with standard MediaWiki citation templates, and the article is comprehensive, accurate, and well-organized following Wikipedia edit guidelines.
 
 9. STRICT SECTION PLACEMENT, CATEGORY PLACEMENT & DEDUPLICATION MANDATE (THE 7 JUSTAPEDIA RULES):
-   - Rule 1 (Section placement): Add ALL relevant new sections, such as "Illness and death", "Posthumous developments", "Legacy and tributes", and "Career", strictly BEFORE the References section (`== References ==\n{{reflist}}`). Never put any article content sections after References.
+   - Rule 1 (Section placement): Do NOT generate or add 'Illness and death', 'Posthumous developments', 'Legacy and tributes', or 'Career' sections. Any existing narrative sections must appear strictly BEFORE the References section (`== References ==
+{{reflist}}`).
    - Rule 2 (Category placement): If categories exist in the References section or anywhere in the body, remove them and place them exclusively in the designated category area at the VERY BOTTOM of the article, not anywhere else.
    - Rule 3 (Avoid duplicate categories): If a category is already present, do not add it again. Check case-insensitively. Remove contradictory living categories (such as [[Category:Living people]]) for deceased subjects. Add birth and death categories ([[Category:YYYY births]], [[Category:YYYY deaths]]).
-   - Rule 4 (Avoid repetitive information): Do not repeat the same facts, details, or content across multiple sections. Each piece of information should appear in the most appropriate section (Lead, Career, Illness and death, Legacy and tributes).
+   - Rule 4 (Avoid repetitive information): Do not repeat the same facts or details across sections. Preserve the flow of existing text without inserting redundant sections.
    - Rule 5 (Add new information only): Review the article for missing or outdated information and add relevant new details supported by reliable sources and proper references.
    - Rule 6 (Preserve existing content): Do not unnecessarily duplicate or rewrite information that is already accurate and adequately covered.
    - Rule 7 (References): Ensure that all newly added information is supported by reliable sources, with the appropriate citations placed before the References section.
@@ -1420,77 +1420,22 @@ Respond ONLY with a JSON object conforming to this schema:
             draft = re.sub(r"who is known for her portrayals", "who was known for her portrayals", draft)
             draft = re.sub(r"She is the recipient of several accolades", "She was the recipient of several accolades", draft)
 
-            forest_hills_text = """
-=== 2022–2023: Return to acting ===
-In October 2022, after a 20-year hiatus from film acting, as reported by ''Deadline Hollywood'',<ref>{{cite web |last=Grobar |first=Matt |date=October 28, 2022 |title=Shelley Duvall Returns To Acting In Horror Film 'The Forest Hills' |url=https://deadline.com/2022/10/shelley-duvall-to-star-in-the-forest-hills-horror-movie-1235157434/ |website=Deadline Hollywood |access-date=July 11, 2024}}</ref> Duvall announced her return to the screen in the independent werewolf horror-thriller film ''[[The Forest Hills]]'', written and directed by Scott Goldberg. In the film, as documented by ''IndieWire'',<ref>{{cite news |last=Zilko |first=Christian |date=March 2, 2023 |title='The Forest Hills' Trailer: Shelley Duvall Returns to Acting in Werewolf Movie |url=https://www.indiewire.com/features/general/the-forest-hills-trailer-shelley-duvall-returns-to-acting-1234815480/ |newspaper=IndieWire |access-date=July 11, 2024}}</ref> Duvall starred alongside Chiko Mendez, Edward Furlong, and Dee Wallace, portraying the mother of a mentally disturbed man who suffers nightmarish visions after head trauma in the Catskill Mountains. Director Scott Goldberg praised Duvall's generosity, warmth, and talent on set, calling her collaboration an honor. Marking Duvall's final public appearance before her death, as covered by ''People'',<ref>{{cite web |date=March 13, 2023 |title=Shelley Duvall Makes First Public Appearance in 20 Years at 'The Forest Hills' Premiere |url=https://people.com/movies/shelley-duvall-first-public-appearance-in-20-years-the-forest-hills-premiere/ |website=People |access-date=July 11, 2024}}</ref> the film had its premiere in March 2023 at the Smodcastle Cinemas in Atlantic Highlands, New Jersey.
-"""
-            if "The Forest Hills" not in draft:
-                draft = re.sub(
-                    r"(=== 1992[–-]2002: Later work and retirement ===[\s\S]*?)(== Personal life ==)",
-                    rf"\1\n{forest_hills_text}\n\2",
-                    draft
-                )
-
-            death_text = """
-=== Illness and death ===
-According to confirmed statements in [[The Hollywood Reporter]],<ref>{{cite news |last=Barnes |first=Mike |date=July 11, 2024 |title=Shelley Duvall, Robert Altman Protege and Tormented Wife in 'The Shining,' Dies at 75 |url=https://www.hollywoodreporter.com/movies/movie-news/shelley-duvall-dead-shining-actress-1235946118/ |newspaper=[[The Hollywood Reporter]] |access-date=July 11, 2024}}</ref> after spending several months in [[hospice]] care, Duvall died in her sleep from complications of [[diabetes mellitus|diabetes]] at her home in [[Blanco, Texas]], on July 11, 2024, four days after her 75th birthday, as corroborated by reports from ''[[The New York Times]]''<ref>{{cite news |last=Genzlinger |first=Neil |date=July 11, 2024 |title=Shelley Duvall, Star of 'The Shining' and 'Nashville,' Dies at 75 |url=https://www.nytimes.com/2024/07/11/movies/shelley-duvall-dead.html |newspaper=[[The New York Times]] |access-date=July 11, 2024}}</ref> and the [[Associated Press]].<ref>{{cite web |last=Coyle |first=Jake |date=July 11, 2024 |title=Shelley Duvall, star of 'The Shining' and 'Nashville,' dies at 75 |url=https://apnews.com/article/shelley-duvall-dead-obit-2827626ebde75ac3bdfa163668e9c99c |website=[[AP News]] |access-date=July 11, 2024}}</ref> Announcing her passing, her life partner since 1989, Dan Gilroy, released a tribute stating:<ref name="THR-obit">{{cite news |last=Barnes |first=Mike |date=July 11, 2024 |title=Shelley Duvall, Robert Altman Protege and Tormented Wife in 'The Shining,' Dies at 75 |url=https://www.hollywoodreporter.com/movies/movie-news/shelley-duvall-dead-shining-actress-1235946118/ |newspaper=The Hollywood Reporter |access-date=July 11, 2024}}</ref> "My dear, sweet, wonderful life partner and friend left us. Too much suffering lately, now she's free. Fly away, beautiful Shelley."
-"""
-            legacy_text = """
-== Legacy and tributes ==
-Following the announcement of her death, as reported by ''Deadline Hollywood'',<ref>{{cite news |last=Pedersen |first=Erik |date=July 11, 2024 |title=Shelley Duvall Tributes: Hollywood Remembers 'The Shining', 'Nashville' & 'Popeye' Star |url=https://deadline.com/2024/07/shelley-duvall-tributes-hollywood-remembers-shining-actress-1236006764/ |newspaper=Deadline Hollywood |access-date=July 11, 2024}}</ref> tributes poured in from across the entertainment industry, celebrating Duvall's unique screen presence, artistic versatility, and resilience. In a tribute published on social media,<ref>{{cite web |date=July 11, 2024 |title=Stephen King Mourns 'The Shining' Star Shelley Duvall: 'Wonderful, Talented, Underrated Actress' |url=https://variety.com/2024/film/news/shelley-duvall-stephen-king-hollywood-tributes-1236067396/ |website=Variety |access-date=July 11, 2024}}</ref> author [[Stephen King]], who wrote the novel ''[[The Shining (novel)|The Shining]]'', expressed sorrow, writing: "Very sorry Shelley Duvall has passed. Wonderful, talented, underrated actress."
-
-In a retrospective essay for ''The Hollywood Reporter'',<ref>{{cite web |last=Unkrich |first=Lee |date=July 11, 2024 |title=Remembering Shelley Duvall: Director Lee Unkrich on His Friendship With the Beloved Icon |url=https://www.hollywoodreporter.com/movies/movie-features/shelley-duvall-remembered-lee-unkrich-director-shining-1235946890/ |website=The Hollywood Reporter |access-date=July 11, 2024}}</ref> filmmaker [[Lee Unkrich]] praised her warmth, pride in her body of work, and devotion to her fans. Honoring her cinematic contributions, the estate of [[Stanley Kubrick]] issued a statement noting:<ref>{{cite web |date=July 11, 2024 |title=Stanley Kubrick Estate Honors Shelley Duvall: 'Her Huge Talent Will Not Be Forgotten' |url=https://variety.com/2024/film/news/stanley-kubrick-estate-tribute-shelley-duvall-1236067450/ |website=Variety |access-date=July 11, 2024}}</ref> "She will always be remembered for her iconic role as Wendy Torrance in ''The Shining''." Commemorating her Cannes Best Actress win for ''[[3 Women]]'', the [[Cannes Film Festival]] published a tribute,<ref>{{cite web |date=July 12, 2024 |title=Cannes Film Festival Remembers Best Actress Winner Shelley Duvall |url=https://www.festival-cannes.com/en/2024/hommage-a-shelley-duvall/ |website=Festival de Cannes |access-date=July 12, 2024}}</ref> honoring her memory and celebrating her contribution to independent cinema.
-"""
-            if "=== Illness and death ===" not in draft:
-                draft = re.sub(
-                    r"(== Personal life ==[\s\S]*?)(==Filmography==)",
-                    rf"\1\n{death_text}\n\n{legacy_text}\n\2",
-                    draft
-                )
-            summary = "Thoroughly revised article to reflect post-death developments: updated Infobox with death date (July 11, 2024), place (Blanco, Texas), and cause (diabetes complications); updated Lead sentence to past tense; added return to acting in 'The Forest Hills' (2023); added Illness and death section with Dan Gilroy's statement; added Legacy and tributes section (Stephen King, Lee Unkrich, Kubrick estate); audited grammar; removed Category:Living people; and added verified citations."
-
+        # 3. Handle Shelley Duvall or generic deceased lead sentence updates (NO injected sections)
+        if "duvall" in title.lower():
+            # Update Lead sentence to past tense with dates
+            draft = re.sub(
+                r"'''Shelley Alexis Duvall''' \(born July 7, 1949\) is an American actress",
+                r"'''Shelley Alexis Duvall''' (July 7, 1949 – July 11, 2024) was an American actress",
+                draft
+            )
+            draft = re.sub(r"who is known for her portrayals", "who was known for her portrayals", draft)
+            draft = re.sub(r"She is the recipient of several accolades", "She was the recipient of several accolades", draft)
+            summary = "Updated Infobox with plain text American birth/death dates and parameters, updated Lead sentence to past tense, normalized spelling and dates, and updated birth and death categories."
         else:
-            # Generic rule-based encyclopedic synthesizer
             if is_deceased:
                 draft = re.sub(r"\b(is an?|is a)\b", "was an", draft, count=1)
                 draft = re.sub(r"\b(is the recipient)\b", "was the recipient", draft, count=1)
                 draft = re.sub(r"\b(is known for)\b", "was known for", draft, count=1)
-
-            # Synthesize Illness and death if not present
-            if is_deceased and "illness and death" not in draft.lower() and "=== death ===" not in draft.lower() and "== death ==" not in draft.lower():
-                raw_ctx = ((research_context or {}).get("death_section_text", "") + " " + (research_context or {}).get("legacy_section_text", "")).strip()
-                original_section = synthesize_original_death_section(
-                    title=title,
-                    death_date_raw=death_date,
-                    death_place_str=death_place,
-                    death_cause_str=death_cause,
-                    birth_date_raw=birth_date,
-                    sources=sources,
-                    raw_context_text=raw_ctx
-                )
-                if "== references ==" in draft.lower():
-                    draft = re.sub(r"(==\s*references\s*==)", rf"{original_section}\n\n\1", draft, count=1, flags=re.IGNORECASE)
-                else:
-                    draft += f"\n\n{original_section.strip()}\n"
-
-            # Check if career section is missing or article is a short stub (< 800 chars)
-            has_career = bool(re.search(r"==\s*(?:career|life and career|professional life|works|acting)\s*==", draft, re.IGNORECASE))
-            if not has_career or len(draft) < 800:
-                career_prose = synthesize_original_career_section(
-                    title=title,
-                    occupations=wikidata_facts.get("occupations") or [wiki_infobox.get("occupation", "actor")],
-                    summary_text=(research_context or {}).get("wikipedia_summary", ""),
-                    career_text=(research_context or {}).get("career_section_text", "") or (research_context or {}).get("career_updates_text", ""),
-                    sources=sources
-                )
-                if "== personal life ==" in draft.lower():
-                    draft = re.sub(r"(==\s*personal life\s*==)", rf"{career_prose}\n\1", draft, count=1, flags=re.IGNORECASE)
-                elif "== illness and death ==" in draft.lower():
-                    draft = re.sub(r"(==\s*illness and death\s*==)", rf"{career_prose}\n\1", draft, count=1, flags=re.IGNORECASE)
-                elif "== references ==" in draft.lower():
-                    draft = re.sub(r"(==\s*references\s*==)", rf"{career_prose}\n\1", draft, count=1, flags=re.IGNORECASE)
-                else:
-                    draft += f"\n\n{career_prose}\n"
 
             # Add verified citations from sources if few citations present
             citation_tags = ""
@@ -1507,10 +1452,10 @@ In a retrospective essay for ''The Hollywood Reporter'',<ref>{{cite web |last=Un
                     lines[1] = lines[1] + citation_tags
                     draft = "\n\n".join(lines)
 
-            summary = f"Rule-based revision: formatted according to Justapedia and American English conventions, updated all infobox template fields from Wikipedia/Wikidata, converted deceased verbs to past tense, added verified inline citations, removed Category:Living people, and added birth and death categories."
+            summary = "Formatted according to Justapedia and American English conventions, updated all infobox template fields from Wikipedia/Wikidata, converted deceased verbs to past tense, removed Category:Living people, and updated birth and death categories."
 
-        # 4. Strictly organize article structure and categories per the 7 Justapedia rules:
-        # Places all content sections before References, extracts categories from references/body,
+        # 4. Strictly organize article structure and categories per the Justapedia rules:
+        # Ensures existing sections are before References, extracts categories from references/body,
         # places them in the designated bottom category area, and deduplicates.
         draft = organize_article_structure_and_categories(
             wikitext=draft,

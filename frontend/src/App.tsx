@@ -510,13 +510,6 @@ export function App() {
             </span>
           </div>
           <div className="flex items-center space-x-4 text-xs">
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="text-slate-500 hover:text-slate-800 hover:underline"
-            >
-              Settings & Credentials
-            </button>
-            <span>•</span>
             <a
               href="https://justapedia.org"
               target="_blank"

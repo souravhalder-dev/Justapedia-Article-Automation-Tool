@@ -2,6 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    }
+  ],
   "headers": [
     {
       "source": "/",
@@ -17,8 +23,8 @@
     }
   ],
   "functions": {
-    "backend/app/main.py": {
-      "includeFiles": "{backend/**,frontend/dist/**}",
+    "api/index.py": {
+      "includeFiles": "backend/**",
       "maxDuration": 60
     }
   }
