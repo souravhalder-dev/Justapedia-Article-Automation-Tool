@@ -160,27 +160,29 @@ export const api = {
   },
 
   // Discovery
-  async discoverDeceased(category_name?: string, limit: number = 50, filter_incomplete_only: boolean = true): Promise<ArticleJob[]> {
+  async discoverDeceased(category_name?: string, limit: number = 50, filter_incomplete_only: boolean = true, exclude_titles?: string[]): Promise<ArticleJob[]> {
     const res = await fetch(`${BASE_URL}/api/discovery/deceased`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({
         category_name: category_name || 'Category:2024 deaths',
         limit,
-        filter_incomplete_only
+        filter_incomplete_only,
+        exclude_titles
       })
     });
     return handleResponse<ArticleJob[]>(res);
   },
 
-  async discoverCategory(category_name: string, limit: number = 25, filter_incomplete_only: boolean = false): Promise<ArticleJob[]> {
+  async discoverCategory(category_name: string, limit: number = 25, filter_incomplete_only: boolean = false, exclude_titles?: string[]): Promise<ArticleJob[]> {
     const res = await fetch(`${BASE_URL}/api/discovery/category`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
       body: JSON.stringify({
         category_name,
         limit,
-        filter_incomplete_only
+        filter_incomplete_only,
+        exclude_titles
       })
     });
     return handleResponse<ArticleJob[]>(res);

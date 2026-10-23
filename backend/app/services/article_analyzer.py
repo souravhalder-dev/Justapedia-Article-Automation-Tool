@@ -14,6 +14,21 @@ class ArticleAnalyzer:
         Check if any of the specified infobox fields has a non-empty value.
         Ignores wikitext comments <!-- --> and empty whitespace.
         """
+        try:
+            parsed = mwparserfromhell.parse(wikitext)
+            for tmpl in parsed.filter_templates():
+                if str(tmpl.name).strip().lower().startswith("infobox"):
+                    for name in field_names:
+                        if tmpl.has(name):
+                            raw_val = str(tmpl.get(name).value)
+                            cleaned = re.sub(r"<!--.*?-->", "", raw_val)
+                            cleaned = re.sub(r"<ref.*?(?:/>|</ref>)", "", cleaned, flags=re.DOTALL)
+                            cleaned = cleaned.strip()
+                            if cleaned and cleaned not in ("?", "unknown", "n/a", "-", "--"):
+                                return True
+        except Exception:
+            pass
+
         names_re = "|".join(re.escape(name) for name in field_names)
         pattern = rf"\|\s*(?:{names_re})\s*=\s*([^\n|}}]+)"
         for match in re.finditer(pattern, wikitext, re.IGNORECASE):
@@ -51,7 +66,7 @@ class ArticleAnalyzer:
             templates = []
 
         # 1. Determine if this is a biography
-        has_bio_infobox = any("infobox" in t and any(b in t for b in ["person", "actor", "musical artist", "writer", "politician", "scientist", "athlete", "military person", "officeholder", "football biography"]) for t in templates)
+        has_bio_infobox = any(t.startswith("infobox") for t in templates)
         has_birth_template = any("birth" in t for t in templates)
         bio_keywords = ["born", "birth", "early life", "graduated", "career", "died", "death"]
         is_biography = has_bio_infobox or has_birth_template or sum(1 for kw in bio_keywords if kw in lower_text) >= 2

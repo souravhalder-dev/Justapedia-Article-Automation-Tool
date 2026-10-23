@@ -77,11 +77,16 @@ export function App() {
       ]);
 
       if (artList.status === 'fulfilled') {
-        let list = artList.value;
+        let savedList: string[] = [];
+        try { savedList = JSON.parse(localStorage.getItem('justapedia_saved_titles') || '[]'); } catch {}
+        let list = artList.value.filter(a => a.status !== 'saved' && !savedList.includes(a.title));
         if (list.length === 0) {
           const cached = localStorage.getItem('justapedia_queue');
           if (cached) {
-            try { list = JSON.parse(cached); } catch {}
+            try { 
+              const parsed = JSON.parse(cached);
+              list = parsed.filter((a: any) => a.status !== 'saved' && !savedList.includes(a.title));
+            } catch {}
           }
         }
         setArticles(list);
@@ -127,11 +132,14 @@ export function App() {
   const handleDiscoverDeceased = async (category: string, limit: number, incompleteOnly: boolean) => {
     setIsLoading(true);
     try {
-      const newArticles = await api.discoverDeceased(category, limit, incompleteOnly);
-      if (newArticles.length > 0) {
-        setArticles(newArticles);
-        localStorage.setItem('justapedia_queue', JSON.stringify(newArticles));
-        setSelectedArticleId(newArticles[0].id);
+      let savedList: string[] = [];
+      try { savedList = JSON.parse(localStorage.getItem('justapedia_saved_titles') || '[]'); } catch {}
+      const newArticles = await api.discoverDeceased(category, limit, incompleteOnly, savedList);
+      const filtered = newArticles.filter(a => a.status !== 'saved' && !savedList.includes(a.title));
+      if (filtered.length > 0) {
+        setArticles(filtered);
+        localStorage.setItem('justapedia_queue', JSON.stringify(filtered));
+        setSelectedArticleId(filtered[0].id);
       } else {
         await loadInitialData();
       }
@@ -145,11 +153,14 @@ export function App() {
   const handleDiscoverCategory = async (category: string, limit: number, incompleteOnly: boolean) => {
     setIsLoading(true);
     try {
-      const newArticles = await api.discoverCategory(category, limit, incompleteOnly);
-      if (newArticles.length > 0) {
-        setArticles(newArticles);
-        localStorage.setItem('justapedia_queue', JSON.stringify(newArticles));
-        setSelectedArticleId(newArticles[0].id);
+      let savedList: string[] = [];
+      try { savedList = JSON.parse(localStorage.getItem('justapedia_saved_titles') || '[]'); } catch {}
+      const newArticles = await api.discoverCategory(category, limit, incompleteOnly, savedList);
+      const filtered = newArticles.filter(a => a.status !== 'saved' && !savedList.includes(a.title));
+      if (filtered.length > 0) {
+        setArticles(filtered);
+        localStorage.setItem('justapedia_queue', JSON.stringify(filtered));
+        setSelectedArticleId(filtered[0].id);
       } else {
         await loadInitialData();
       }
@@ -248,7 +259,16 @@ export function App() {
       const res = await api.saveToJustapedia(selectedArticleId, options, art?.title);
       
       if (res.success) {
-        // Once successfully updated and saved, it should no longer appear in the list of articles that need updating
+        // Once successfully updated and saved, record in persistent storage so it is permanently excluded
+        try {
+          const savedList: string[] = JSON.parse(localStorage.getItem('justapedia_saved_titles') || '[]');
+          if (art?.title && !savedList.includes(art.title)) {
+            savedList.push(art.title);
+            localStorage.setItem('justapedia_saved_titles', JSON.stringify(savedList));
+          }
+        } catch {}
+
+        // Remove from current queue
         const remaining = articles.filter(a => a.id !== selectedArticleId);
         setArticles(remaining);
         localStorage.setItem('justapedia_queue', JSON.stringify(remaining));

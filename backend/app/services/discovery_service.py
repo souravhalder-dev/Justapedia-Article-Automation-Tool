@@ -86,7 +86,8 @@ class DiscoveryService:
         db: AsyncSession,
         categories: Optional[List[str]] = None,
         limit_per_cat: int = 50,
-        filter_incomplete_only: bool = True
+        filter_incomplete_only: bool = True,
+        exclude_titles: Optional[List[str]] = None
     ) -> List[ArticleJob]:
         user_cat = categories[0] if (categories and len(categories) > 0) else None
         cats_to_scan = DiscoveryService._build_deceased_categories(user_cat)
@@ -98,6 +99,8 @@ class DiscoveryService:
         # Exclude articles already completed / saved by user
         existing_saved_res = await db.execute(select(ArticleJob.title).where(ArticleJob.status == "saved"))
         saved_titles = set(existing_saved_res.scalars().all())
+        if exclude_titles:
+            saved_titles.update(exclude_titles)
 
         for cat in cats_to_scan:
             if len(discovered_jobs) >= target_count:
@@ -159,7 +162,8 @@ class DiscoveryService:
         db: AsyncSession,
         category_name: str,
         limit: int = 50,
-        filter_incomplete_only: bool = False
+        filter_incomplete_only: bool = False,
+        exclude_titles: Optional[List[str]] = None
     ) -> List[ArticleJob]:
         cat = category_name.strip()
         if not cat.lower().startswith("category:"):
@@ -171,6 +175,8 @@ class DiscoveryService:
 
         existing_saved_res = await db.execute(select(ArticleJob.title).where(ArticleJob.status == "saved"))
         saved_titles = set(existing_saved_res.scalars().all())
+        if exclude_titles:
+            saved_titles.update(exclude_titles)
 
         cmcontinue = None
         pages_scanned = 0
@@ -281,7 +287,6 @@ class DiscoveryService:
             "missing_death_date",
             "missing_birth_date",
             "contradictory_living_category",
-            "missing_death_cause",
             "missing_death_place",
             "missing_infobox",
             "no_citations",

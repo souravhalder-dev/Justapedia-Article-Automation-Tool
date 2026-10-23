@@ -94,7 +94,8 @@ async def discover_deceased(
             db=db,
             categories=categories,
             limit_per_cat=req.limit,
-            filter_incomplete_only=req.filter_incomplete_only
+            filter_incomplete_only=req.filter_incomplete_only,
+            exclude_titles=req.exclude_titles
         )
         return [job_to_response(j) for j in jobs]
     except Exception as e:
@@ -113,7 +114,8 @@ async def discover_category(
             db=db,
             category_name=req.category_name,
             limit=req.limit,
-            filter_incomplete_only=req.filter_incomplete_only
+            filter_incomplete_only=req.filter_incomplete_only,
+            exclude_titles=req.exclude_titles
         )
         return [job_to_response(j) for j in jobs]
     except Exception as e:

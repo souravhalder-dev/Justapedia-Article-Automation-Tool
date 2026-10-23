@@ -31,9 +31,14 @@ export const ArticleQueue: React.FC<ArticleQueueProps> = ({
 
   // Filtering
   const filteredArticles = articles.filter(a => {
+    let savedList: string[] = [];
+    try {
+      savedList = JSON.parse(localStorage.getItem('justapedia_saved_titles') || '[]');
+    } catch {}
     // Once an article is saved, never display it in the list of articles needing updates
+    if (savedList.includes(a.title)) return false;
     if (a.status === 'saved') return false;
-    if (hideDone && a.status === 'discovered' && (!a.audit_flags || a.audit_flags.length === 0)) return false;
+    if (hideDone && (!a.audit_flags || a.audit_flags.length === 0)) return false;
 
     const matchesSearch = a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (a.category && a.category.toLowerCase().includes(searchQuery.toLowerCase()));

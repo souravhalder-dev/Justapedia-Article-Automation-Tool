@@ -67,47 +67,115 @@ def format_american_date_prose(date_str: str) -> str:
 
 def format_wiki_birth_date(birth_str: str, is_deceased: bool = True) -> str:
     """
-    Format birth date directly into the infobox as plain text using the American date format
-    (Month Day, Year) without using any templates (e.g. 'February 6, 2002' or 'July 7, 1949').
+    Format birth date into MediaWiki template in American format (without df=yes).
+    Deceased: {{Birth date|YYYY|MM|DD}} (no live age).
+    Living:   {{Birth date and age|YYYY|MM|DD}}.
     """
+    if not birth_str:
+        return ""
+    if "{{birth date" in birth_str.lower():
+        val = birth_str
+        if is_deceased:
+            val = re.sub(r"\{\{\s*birth\s+date\s+and\s+age", "{{Birth date", val, flags=re.IGNORECASE)
+        val = re.sub(r"\|\s*df\s*=\s*(?:yes|y|1)\s*", "", val, flags=re.IGNORECASE)
+        return val.strip()
+
+    d_parts = parse_date_components(birth_str)
+    if d_parts:
+        y, m, d = d_parts
+        return f"{{{{Birth date|{y}|{m}|{d}}}}}" if is_deceased else f"{{{{Birth date and age|{y}|{m}|{d}}}}}"
+    m_y = re.search(r"\b(19\d\d|20\d\d)\b", str(birth_str or ""))
+    if m_y:
+        return f"{{{{Birth date|{m_y.group(1)}}}}}" if is_deceased else f"{{{{Birth date and age|{m_y.group(1)}}}}}"
     return format_american_date_prose(birth_str)
 
 def format_wiki_death_date(death_str: str, birth_str: str = "") -> str:
     """
-    Format death date directly into the infobox as plain text using the American date format
-    (Month Day, Year) without using any templates (e.g. 'July 21, 2024' or 'July 11, 2024').
+    Format death date into MediaWiki template in American format.
+    With birth date: {{Death date and age|dy|dm|dd|by|bm|bd}}
+    Without birth:   {{Death date|dy|dm|dd}}
+    (No df=yes, so American format Month Day, Year is displayed).
     """
+    if not death_str:
+        return ""
+    if "{{death date" in death_str.lower():
+        val = re.sub(r"\|\s*df\s*=\s*(?:yes|y|1)\s*", "", death_str, flags=re.IGNORECASE)
+        return val.strip()
+
+    d_parts = parse_date_components(death_str)
+    b_parts = parse_date_components(birth_str) if birth_str else None
+
+    if d_parts and b_parts:
+        dy, dm, dd = d_parts
+        by, bm, bd = b_parts
+        return f"{{{{Death date and age|{dy}|{dm}|{dd}|{by}|{bm}|{bd}}}}}"
+    elif d_parts:
+        dy, dm, dd = d_parts
+        return f"{{{{Death date|{dy}|{dm}|{dd}}}}}"
+
+    m_y = re.search(r"\b(19\d\d|20\d\d)\b", str(death_str or ""))
+    if m_y:
+        return f"{{{{Death date|{m_y.group(1)}}}}}"
     return format_american_date_prose(death_str)
 
-def convert_infobox_dates_to_plain_text(wikitext: str) -> str:
+def ensure_american_infobox_date_templates(wikitext: str, is_deceased: bool = True) -> str:
     """
-    Converts dates of birth and death in infoboxes into the American date format (Month Day, Year)
-    as plain text without using any templates.
-    Handles existing template values like {{birth date and age|...}}, {{birth date|...}},
-    {{death date and age|...}}, {{death date|...}}, as well as raw ISO or Day-Month-Year dates.
-    Example:
-    | birth_date = February 6, 2002
-    | death_date = July 21, 2024
+    Ensures dates of birth and death in infoboxes use standard Wikipedia date templates in American format.
+    - Preserves all references (<ref>...</ref>).
+    - Preserves existing verified date templates without unnecessary modification.
+    - If subject is deceased, converts {{Birth date and age}} to {{Birth date}} and removes df=yes.
+    - If birth_date or death_date has plain text, converts to standard American date template.
     """
     if not wikitext:
         return ""
-    pattern = re.compile(
-        r"(\|\s*(?:birth_date|birth-date|death_date|death-date)\s*=\s*)([^\n]+)",
-        re.IGNORECASE
-    )
-    def repl(m):
-        prefix = m.group(1)
-        raw_val = m.group(2).strip()
-        comment_match = re.search(r"(<!--.*?-->)", raw_val)
-        comment_str = f" {comment_match.group(1)}" if comment_match else ""
-        clean_val = re.sub(r"<!--.*?-->", "", raw_val).strip()
-        if clean_val:
-            converted = format_american_date_prose(clean_val)
-            if converted:
-                return f"{prefix}{converted}{comment_str}"
-        return m.group(0)
 
-    return pattern.sub(repl, wikitext)
+    try:
+        import mwparserfromhell
+        parsed = mwparserfromhell.parse(wikitext)
+        for tmpl in parsed.filter_templates():
+            if not str(tmpl.name).strip().lower().startswith("infobox"):
+                continue
+
+            # 1. Check death_date
+            if tmpl.has("death_date") and is_deceased:
+                param = tmpl.get("death_date")
+                raw_val = str(param.value).strip()
+                if raw_val:
+                    if re.search(r"\{\{\s*death\s+date", raw_val, re.IGNORECASE):
+                        new_val = re.sub(r"\|\s*df\s*=\s*(?:yes|y|1)\s*", "", raw_val, flags=re.IGNORECASE).strip()
+                        param.value = f" {new_val}\n"
+                    else:
+                        refs = "".join(re.findall(r"<ref.*?(?:/>|</ref>)", raw_val, re.DOTALL | re.IGNORECASE))
+                        clean_date = re.sub(r"<ref.*?(?:/>|</ref>)", "", raw_val, flags=re.DOTALL | re.IGNORECASE).strip()
+                        clean_date = re.sub(r"<!--.*?-->", "", clean_date).strip()
+                        b_str = str(tmpl.get("birth_date").value) if tmpl.has("birth_date") else ""
+                        d_tmpl = format_wiki_death_date(clean_date, b_str)
+                        if d_tmpl:
+                            param.value = f" {d_tmpl}{refs}\n"
+
+            # 2. Check birth_date
+            if tmpl.has("birth_date"):
+                param = tmpl.get("birth_date")
+                raw_val = str(param.value).strip()
+                if raw_val:
+                    if re.search(r"\{\{\s*birth\s+date", raw_val, re.IGNORECASE):
+                        val = raw_val
+                        if is_deceased:
+                            val = re.sub(r"\{\{\s*birth\s+date\s+and\s+age", "{{Birth date", val, flags=re.IGNORECASE)
+                        val = re.sub(r"\|\s*df\s*=\s*(?:yes|y|1)\s*", "", val, flags=re.IGNORECASE).strip()
+                        param.value = f" {val}\n"
+                    else:
+                        refs = "".join(re.findall(r"<ref.*?(?:/>|</ref>)", raw_val, re.DOTALL | re.IGNORECASE))
+                        clean_date = re.sub(r"<ref.*?(?:/>|</ref>)", "", raw_val, flags=re.DOTALL | re.IGNORECASE).strip()
+                        clean_date = re.sub(r"<!--.*?-->", "", clean_date).strip()
+                        b_tmpl = format_wiki_birth_date(clean_date, is_deceased=is_deceased)
+                        if b_tmpl:
+                            param.value = f" {b_tmpl}{refs}\n"
+
+        return str(parsed)
+    except Exception as e:
+        logger.warning(f"Error ensuring American date templates: {e}")
+        return wikitext
 
 def format_american_location(loc_str: str) -> str:
     """Format geographical location according to American standards (e.g. 'City, State, U.S.')."""
@@ -387,8 +455,8 @@ def rewrite_article_prose(
                 flags=re.IGNORECASE
             )
 
-    # 4. Convert all infobox birth and death dates into plain text American format (no templates)
-    result_text = convert_infobox_dates_to_plain_text(result_text)
+    # 4. Convert all infobox birth and death dates into American template format
+    result_text = ensure_american_infobox_date_templates(result_text, is_deceased=is_deceased)
 
     # 5. Update {{short description}} per Wikipedia/Justapedia standards (never removes it)
     result_text = update_short_description(
@@ -647,15 +715,15 @@ def merge_infobox_with_wiki_data(
     has_infobox = bool(re.search(r"\{\{Infobox", draft, re.IGNORECASE))
 
     if has_infobox:
-        # Convert any existing templates in birth_date and death_date to plain text
-        draft = convert_infobox_dates_to_plain_text(draft)
+        # First ensure existing date templates are formatted per American standards (no df=yes) and references preserved
+        draft = ensure_american_infobox_date_templates(draft, is_deceased=is_deceased)
 
         try:
             import mwparserfromhell
             parsed = mwparserfromhell.parse(draft)
             infobox_template = None
             for t in parsed.filter_templates():
-                if "infobox" in str(t.name).lower():
+                if str(t.name).strip().lower().startswith("infobox"):
                     infobox_template = t
                     break
 
@@ -686,18 +754,36 @@ def merge_infobox_with_wiki_data(
                         curr_param = infobox_template.get(p_name)
                         curr_raw = str(curr_param.value).strip()
                         cleaned_curr = re.sub(r"<!--.*?-->", "", curr_raw).strip()
-                        
+                        existing_refs = "".join(re.findall(r"<ref.*?(?:/>|</ref>)", curr_raw, re.DOTALL | re.IGNORECASE))
+
+                        # If death_date already has a valid death date template, PRESERVE IT!
+                        if p_name == "death_date" and re.search(r"\{\{\s*death\s+date", curr_raw, re.IGNORECASE):
+                            val = re.sub(r"\|\s*df\s*=\s*(?:yes|y|1)\s*", "", curr_raw, flags=re.IGNORECASE).strip()
+                            curr_param.value = f" {val}\n"
+                            continue
+
+                        # If birth_date already has a valid birth date template, PRESERVE IT!
+                        if p_name == "birth_date" and re.search(r"\{\{\s*birth\s+date", curr_raw, re.IGNORECASE):
+                            val = curr_raw
+                            if is_deceased:
+                                val = re.sub(r"\{\{\s*birth\s+date\s+and\s+age", "{{Birth date", val, flags=re.IGNORECASE)
+                            val = re.sub(r"\|\s*df\s*=\s*(?:yes|y|1)\s*", "", val, flags=re.IGNORECASE).strip()
+                            curr_param.value = f" {val}\n"
+                            continue
+
                         # Replace if currently blank, unknown, or if updating date/cause/place/closed-range/richer-info
                         should_replace = (
                             not cleaned_curr
                             or cleaned_curr in ("?", "-", "--", "unknown", "n/a")
-                            or (p_name in ("death_date", "birth_date") and ("{{" in curr_raw or p_val != cleaned_curr))
-                            or (p_name in ("death_place", "death_cause", "birth_place") and len(cleaned_curr) < 3)
+                            or (p_name in ("death_place", "birth_place") and len(cleaned_curr) < 3)
                             or (p_name in ("years_active", "partner", "spouse") and is_deceased and "present" in cleaned_curr.lower())
                             or (p_name in ("occupation", "birth_name", "resting_place", "nationality") and len(p_val) > len(cleaned_curr))
                         )
                         if should_replace:
-                            infobox_template.add(p_name, p_val)
+                            val_to_set = p_val
+                            if existing_refs and existing_refs not in val_to_set:
+                                val_to_set = f"{val_to_set}{existing_refs}"
+                            curr_param.value = f" {val_to_set}\n"
                     else:
                         infobox_template.add(p_name, p_val)
 
@@ -744,8 +830,8 @@ def merge_infobox_with_wiki_data(
         new_infobox_str = "\n".join(lines)
         draft = f"{new_infobox_str}\n{draft.strip()}"
 
-    # Final guarantee: convert any birth/death date templates to plain text American format
-    draft = convert_infobox_dates_to_plain_text(draft)
+    # Final guarantee: ensure birth/death date templates are in American format without removing refs
+    draft = ensure_american_infobox_date_templates(draft, is_deceased=is_deceased)
     return draft
 
 
@@ -1047,7 +1133,7 @@ class AIService:
                 birth_year=b_year,
                 death_year=d_year
             )
-            res["generated_draft"] = convert_infobox_dates_to_plain_text(res["generated_draft"])
+            res["generated_draft"] = ensure_american_infobox_date_templates(res["generated_draft"], is_deceased=is_deceased)
 
         return res
 
@@ -1258,17 +1344,19 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
      * Preserve all existing tables, filmographies, and templates without truncation.
 
 6. INFOBOX TEMPLATE RULES & AMERICAN ENGLISH CONVENTIONS (MOS:ENGVAR, MOS:DATETYPE, MOS:NUM):
-   - INFOBOX DATES MANDATE (NO TEMPLATES):
-     * Update the dates of birth and death in the infobox using the American date format, without using any templates.
-     * Enter the dates directly into the infobox as plain text, following the appropriate infobox formatting conventions.
-     * Example:
-       | birth_date = February 6, 2002
-       | death_date = July 21, 2024
+   - INFOBOX DATE TEMPLATES MANDATE (AMERICAN FORMAT):
+     * Use appropriate MediaWiki date templates in American format (without df=yes):
+       - For deceased death date: `{{Death date and age|YYYY|MM|DD|YYYY|MM|DD}}` (or `{{Death date|YYYY|MM|DD}}` if birth date is unknown).
+       - For deceased birth date: `{{Birth date|YYYY|MM|DD}}` (do NOT use `{{Birth date and age}}` on deceased subjects).
+       - For living subjects: `{{Birth date and age|YYYY|MM|DD}}`.
+     * Do NOT convert date templates to plain text!
+     * NEVER delete existing valid references `<ref>...</ref>` or citations from infobox parameters!
+     * If an existing valid date template already exists in the infobox, PRESERVE IT and its supporting references intact!
    - TEMPLATE RULES & FIELD SEPARATION:
-     * Use the appropriate canonical infobox (e.g. `{{Infobox person}}`, `{{Infobox actor}}`, `{{Infobox musical artist}}`, `{{Infobox politician}}`). If none exists, construct and prepend one at the top.
+     * Use the appropriate canonical infobox (e.g. `{{Infobox person}}`, `{{Infobox actor}}`, `{{Infobox musical artist}}`, `{{Infobox politician}}`, `{{Infobox artist}}`). If none exists, construct and prepend one at the top.
      * Strictly separate fields into their canonical parameters:
-       - `birth_date`: Enter directly into the infobox as plain text using the American date format (Month Day, Year), WITHOUT using any templates (e.g. `| birth_date = February 6, 2002` or `| birth_date = July 7, 1949`). Never use {{birth date}} or {{birth date and age}}.
-       - `death_date`: Enter directly into the infobox as plain text using the American date format (Month Day, Year), WITHOUT using any templates (e.g. `| death_date = July 21, 2024` or `| death_date = July 11, 2024`). Never use {{death date}} or {{death date and age}}. NEVER put locations or causes in death_date.
+       - `birth_date`: MediaWiki template in American format `{{Birth date|YYYY|MM|DD}}` (without df=yes).
+       - `death_date`: MediaWiki template in American format `{{Death date and age|YYYY|MM|DD|YYYY|MM|DD}}` (without df=yes). NEVER put locations or causes in death_date.
        - `death_place`: MUST contain ONLY the geographical location formatted per American standards (e.g. `[[Blanco, Texas]], U.S.` or `Los Angeles, California, U.S.`). NEVER put medical causes or dates in death_place.
        - `death_cause`: MUST contain ONLY the verified medical/official cause of death (e.g. `Complications from [[diabetes mellitus|diabetes]]` or `Cardiac arrest`). If unverified, leave blank.
        - `years_active`: Close open ranges upon death using an en dash (e.g. `1970–2002, 2022–2023`, NEVER `present`).
@@ -1474,8 +1562,8 @@ Respond ONLY with a JSON object conforming to this schema:
             default_role=(wiki_infobox.get("occupation") or ", ".join(wikidata_facts.get("occupations", [])[:2])).capitalize() or "Subject"
         )
 
-        # 6. Final guarantee: convert any birth/death date templates to plain text American format
-        draft = convert_infobox_dates_to_plain_text(draft)
+        # 6. Final guarantee: ensure birth/death date templates are in American format without removing refs
+        draft = ensure_american_infobox_date_templates(draft, is_deceased=is_deceased)
 
         facts = {
             "full_name": title,

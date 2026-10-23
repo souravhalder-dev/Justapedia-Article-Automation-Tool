@@ -31,6 +31,7 @@ class CategoryDiscoverRequest(BaseModel):
     limit: int = 25
     mode: str = "category"  # "category" or "deceased"
     filter_incomplete_only: bool = True
+    exclude_titles: Optional[List[str]] = None
 
 class ArticleJobResponse(BaseModel):
     id: int
