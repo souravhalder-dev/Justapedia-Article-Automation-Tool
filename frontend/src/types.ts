@@ -102,3 +102,22 @@ export interface SaveToWikiResponse {
   is_sandbox: boolean;
   message: string;
 }
+
+export interface AuthUser {
+  logged_in: boolean;
+  username?: string | null;
+  auth_type?: 'oauth' | 'credentials' | null;
+}
+
+export interface OAuthInitiateResponse {
+  success: boolean;
+  oauth_token: string;
+  authorize_url: string;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  session_token: string;
+  username: string;
+  auth_type: string;
+}

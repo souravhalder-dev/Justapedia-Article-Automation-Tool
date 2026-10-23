@@ -295,12 +295,14 @@ class JustapediaClient:
         summary: str,
         basetimestamp: Optional[str] = None,
         is_minor: bool = False,
-        is_bot: bool = True,
-        use_sandbox: Optional[bool] = None
+        is_bot: bool = False,
+        use_sandbox: Optional[bool] = None,
+        user_session: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Publish approved wikitext directly to Justapedia Wiki.
-        Ensures authenticated session, manages CSRF tokens, and handles conflict protection.
+        Ensures authenticated session (supporting user OAuth or user credentials),
+        manages CSRF tokens, and handles conflict protection.
         """
         target_title = title
         is_sandbox = False
@@ -322,42 +324,107 @@ class JustapediaClient:
             )
             summary = f"[TEST] Draft for {title}: {summary}"
 
-        # Step 0: Ensure authenticated session if credentials exist
-        if not self.logged_in_user and (settings.JUSTAPEDIA_BOT_USERNAME and settings.JUSTAPEDIA_BOT_PASSWORD):
-            logger.info("Session not authenticated. Logging in with configured bot credentials...")
-            await self.login()
+        data = None
 
-        if not self.logged_in_user:
-            return {
-                "success": False,
+        # Scenario A: Authenticated user session provided (OAuth or direct user cookies)
+        if user_session:
+            auth_type = user_session.get("auth_type", "credentials")
+            sess_data = user_session.get("session_data", {})
+
+            if auth_type == "oauth":
+                try:
+                    from requests_oauthlib import OAuth1Session
+                    oauth_tok = sess_data.get("oauth_token")
+                    oauth_sec = sess_data.get("oauth_token_secret")
+                    oauth = OAuth1Session(
+                        client_key=settings.OAUTH_CONSUMER_KEY,
+                        client_secret=settings.OAUTH_CONSUMER_SECRET,
+                        resource_owner_key=oauth_tok,
+                        resource_owner_secret=oauth_sec
+                    )
+                    t_resp = oauth.get(f"{self.api_url}?action=query&meta=tokens&type=csrf&format=json", headers=self.headers, timeout=20)
+                    csrf_token = t_resp.json().get("query", {}).get("tokens", {}).get("csrftoken")
+                    if not csrf_token:
+                        return {"success": False, "title": target_title, "message": "Failed to retrieve CSRF token via OAuth."}
+
+                    payload = {
+                        "action": "edit",
+                        "title": target_title,
+                        "text": wikitext,
+                        "summary": summary,
+                        "token": csrf_token,
+                        "format": "json"
+                    }
+                    if is_minor: payload["minor"] = 1
+                    if is_bot: payload["bot"] = 1
+                    if basetimestamp and not is_sandbox: payload["basetimestamp"] = basetimestamp
+
+                    resp = oauth.post(self.api_url, data=payload, headers=self.headers, timeout=25)
+                    data = resp.json()
+                except Exception as oauth_err:
+                    logger.error(f"OAuth edit error: {oauth_err}")
+                    return {"success": False, "title": target_title, "message": f"OAuth publish failed: {str(oauth_err)}"}
+
+            else:
+                # Direct credentials (cookies)
+                try:
+                    cookies = sess_data.get("cookies", {})
+                    async with httpx.AsyncClient(headers=self.headers, cookies=cookies, timeout=30.0, follow_redirects=True) as u_client:
+                        t_resp = await u_client.get(self.api_url, params={"action": "query", "meta": "tokens", "type": "csrf", "format": "json"})
+                        t_resp.raise_for_status()
+                        csrf_token = t_resp.json().get("query", {}).get("tokens", {}).get("csrftoken")
+                        if not csrf_token:
+                            return {"success": False, "title": target_title, "message": "Failed to retrieve CSRF token with session cookies."}
+
+                        payload = {
+                            "action": "edit",
+                            "title": target_title,
+                            "text": wikitext,
+                            "summary": summary,
+                            "token": csrf_token,
+                            "format": "json"
+                        }
+                        if is_minor: payload["minor"] = 1
+                        if is_bot: payload["bot"] = 1
+                        if basetimestamp and not is_sandbox: payload["basetimestamp"] = basetimestamp
+
+                        resp = await u_client.post(self.api_url, data=payload)
+                        resp.raise_for_status()
+                        data = resp.json()
+                except Exception as cred_err:
+                    logger.error(f"Session cookies edit error: {cred_err}")
+                    return {"success": False, "title": target_title, "message": f"Session publish failed: {str(cred_err)}"}
+
+        else:
+            # Scenario B: Fallback to server-level bot credentials if present
+            if not self.logged_in_user and (settings.JUSTAPEDIA_BOT_USERNAME and settings.JUSTAPEDIA_BOT_PASSWORD):
+                logger.info("Session not authenticated. Logging in with configured bot credentials...")
+                await self.login()
+
+            if not self.logged_in_user:
+                return {
+                    "success": False,
+                    "title": target_title,
+                    "message": "Cannot publish: You must be logged in with your Justapedia account.",
+                    "raw_response": None
+                }
+
+            csrf_token = await self.get_csrf_token()
+            payload = {
+                "action": "edit",
                 "title": target_title,
-                "message": "Cannot publish: Not logged in to Justapedia Wiki. Please check your Bot credentials in Settings.",
-                "raw_response": None
+                "text": wikitext,
+                "summary": summary,
+                "token": csrf_token,
+                "format": "json"
             }
+            if is_minor: payload["minor"] = 1
+            if is_bot: payload["bot"] = 1
+            if basetimestamp and not is_sandbox: payload["basetimestamp"] = basetimestamp
 
-        # Step 1: Fetch valid authenticated CSRF token
-        csrf_token = await self.get_csrf_token()
-
-        payload = {
-            "action": "edit",
-            "title": target_title,
-            "text": wikitext,
-            "summary": summary,
-            "token": csrf_token,
-            "format": "json"
-        }
-        if is_minor:
-            payload["minor"] = 1
-        if is_bot:
-            payload["bot"] = 1
-            
-        # Optional basetimestamp protection against concurrent edit conflicts
-        if basetimestamp and not is_sandbox:
-            payload["basetimestamp"] = basetimestamp
-
-        resp = await self.client.post(self.api_url, data=payload)
-        resp.raise_for_status()
-        data = resp.json()
+            resp = await self.client.post(self.api_url, data=payload)
+            resp.raise_for_status()
+            data = resp.json()
 
         # Check for MediaWiki error responses
         if "error" in data:

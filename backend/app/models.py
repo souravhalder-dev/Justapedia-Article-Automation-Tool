@@ -76,3 +76,14 @@ class AppSetting(Base):
     value = Column(Text, nullable=True)
     description = Column(String(255), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    session_token = Column(String(128), primary_key=True, index=True)
+    username = Column(String(255), nullable=False, index=True)
+    auth_type = Column(String(50), default="credentials")  # "oauth" or "credentials"
+    session_data = Column(Text, nullable=True)  # JSON-encoded cookies or OAuth tokens
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)

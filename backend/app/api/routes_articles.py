@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
@@ -13,6 +13,7 @@ from ..services.research_pipeline import research_pipeline
 from ..services.ai_service import ai_service
 from ..services.diff_service import DiffService
 from ..services.justapedia_client import justapedia_client
+from ..services.auth_service import auth_service
 from .routes_discovery import job_to_response
 
 logger = logging.getLogger(__name__)
@@ -279,6 +280,7 @@ async def save_to_justapedia(
     job_id: int,
     req: SaveToWikiRequest,
     title: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -287,6 +289,12 @@ async def save_to_justapedia(
     Protects against edit conflicts using original timestamp.
     """
     job = await get_or_restore_job(db, job_id, title or req.custom_title)
+
+    # Retrieve logged in user session
+    session_token = None
+    if authorization and authorization.startswith("Bearer "):
+        session_token = authorization.split("Bearer ", 1)[1].strip()
+    user_session = await auth_service.get_session(session_token)
 
     target_title = req.custom_title or job.title
     content_to_save = req.wikitext or job.user_edited_draft or job.generated_draft
@@ -302,7 +310,8 @@ async def save_to_justapedia(
             basetimestamp=job.original_timestamp,
             is_minor=req.is_minor,
             is_bot=req.is_bot,
-            use_sandbox=req.use_sandbox
+            use_sandbox=req.use_sandbox,
+            user_session=user_session
         )
 
         if save_result.get("success"):

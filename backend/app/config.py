@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     JUSTAPEDIA_API_URL: str = "https://justapedia.org/api.php"
     JUSTAPEDIA_BOT_USERNAME: Optional[str] = None
     JUSTAPEDIA_BOT_PASSWORD: Optional[str] = None
+
+    # Justapedia OAuth 1.0a Consumer Credentials
+    OAUTH_CONSUMER_KEY: str = "4ed93435dc4f6ca892173251eed1c644"
+    OAUTH_CONSUMER_SECRET: str = "48faa3a54d28680a66104aa5c94df471a857b200"
+    OAUTH_CALLBACK_URL: str = "oob"
     
     # Safe Test Mode: If True, saves are directed to Justapedia:Sandbox instead of live article
     SAFE_TEST_MODE: bool = False

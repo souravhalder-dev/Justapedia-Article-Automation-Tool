@@ -11,6 +11,7 @@ from .api.routes_discovery import router as discovery_router
 from .api.routes_articles import router as articles_router
 from .api.routes_settings import router as settings_router
 from .api.routes_batch import router as batch_router
+from .api.routes_auth import router as auth_router
 from .services.justapedia_client import justapedia_client
 
 @asynccontextmanager
@@ -48,6 +49,7 @@ app.include_router(discovery_router)
 app.include_router(articles_router)
 app.include_router(settings_router)
 app.include_router(batch_router)
+app.include_router(auth_router)
 
 @app.get("/api")
 @app.get("/api/")

@@ -1,10 +1,12 @@
 import React from 'react';
 import { AppSettings, WikiTestConnectionResponse } from '../types';
-import { BookOpen, ShieldCheck, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { BookOpen, ShieldCheck, RefreshCw, CheckCircle2, AlertCircle, User, LogOut } from 'lucide-react';
 
 interface NavbarProps {
   settings: AppSettings | null;
   connection: WikiTestConnectionResponse | null;
+  currentUser: string | null;
+  onLogout: () => void;
   onOpenSettings?: () => void;
   onRefresh: () => void;
   isLoading: boolean;
@@ -13,6 +15,8 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   settings,
   connection,
+  currentUser,
+  onLogout,
   onRefresh,
   isLoading
 }) => {
@@ -36,11 +40,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Status Indicators & Quick Actions */}
+        {/* Status Indicators & User Profile */}
         <div className="flex items-center space-x-3 text-xs">
           
           {/* Wiki Connection Status */}
-          <div className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border ${
+          <div className={`hidden md:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md border ${
             connection?.connected 
               ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' 
               : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
@@ -51,9 +55,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
             )}
             <span>
-              {connection?.connected 
-                ? (connection.logged_in ? `Logged in: ${connection.username || 'Bot'}` : 'Justapedia Online')
-                : 'Wiki Disconnected'}
+              {connection?.connected ? 'Justapedia Online' : 'Wiki Disconnected'}
             </span>
           </div>
 
@@ -62,6 +64,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-md bg-amber-950/40 border border-amber-500/40 text-amber-300">
               <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
               <span className="font-medium">Sandbox Mode Active</span>
+            </div>
+          )}
+
+          {/* Logged in User Pill & Logout */}
+          {currentUser && (
+            <div className="flex items-center space-x-2 bg-slate-800/90 px-3 py-1.5 rounded-md border border-slate-700 text-slate-200">
+              <User className="w-3.5 h-3.5 text-sky-400" />
+              <span className="font-semibold text-white">{currentUser}</span>
+              <button
+                onClick={onLogout}
+                className="ml-2 pl-2 border-l border-slate-700 text-slate-400 hover:text-rose-400 transition-colors flex items-center"
+                title="Log out of Justapedia"
+              >
+                <LogOut className="w-3.5 h-3.5 mr-1" />
+                <span>Log out</span>
+              </button>
             </div>
           )}
 

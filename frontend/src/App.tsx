@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArticleJob, AppSettings, WikiTestConnectionResponse, SaveToWikiResponse } from './types';
+import { ArticleJob, AppSettings, WikiTestConnectionResponse, SaveToWikiResponse, AuthUser } from './types';
 import { api } from './api';
 import { Navbar } from './components/Navbar';
 import { DiscoveryBar } from './components/DiscoveryBar';
@@ -7,7 +7,8 @@ import { ArticleQueue } from './components/ArticleQueue';
 import { ArticleStudio } from './components/ArticleStudio';
 import { SaveModal } from './components/SaveModal';
 import { SettingsModal } from './components/SettingsModal';
-import { Sparkles, Search, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { LoginScreen } from './components/LoginScreen';
+import { Sparkles, Search, CheckCircle2, AlertCircle, X, Loader2 } from 'lucide-react';
 
 interface BatchProgressState {
   isOpen: boolean;
@@ -22,6 +23,8 @@ interface BatchProgressState {
 }
 
 export function App() {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [articles, setArticles] = useState<ArticleJob[]>([]);
   const [selectedArticleId, setSelectedArticleId] = useState<number | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -31,6 +34,37 @@ export function App() {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
   const [batchProgress, setBatchProgress] = useState<BatchProgressState | null>(null);
   const batchCancelRef = useRef<boolean>(false);
+
+  // Check auth and load initial data
+  const checkAuthAndLoad = async () => {
+    setIsAuthChecking(true);
+    try {
+      const user = await api.getMe();
+      if (user.logged_in) {
+        setAuthUser(user);
+        await loadInitialData();
+      } else {
+        setAuthUser(null);
+      }
+    } catch (e) {
+      setAuthUser(null);
+    } finally {
+      setIsAuthChecking(false);
+    }
+  };
+
+  const handleLoginSuccess = async (username: string) => {
+    setAuthUser({ logged_in: true, username });
+    await loadInitialData();
+  };
+
+  const handleLogout = async () => {
+    await api.logout();
+    setAuthUser(null);
+    setArticles([]);
+    setSelectedArticleId(null);
+    localStorage.removeItem('justapedia_queue');
+  };
 
   // Load initial data
   const loadInitialData = async () => {
@@ -69,7 +103,7 @@ export function App() {
   };
 
   useEffect(() => {
-    loadInitialData();
+    checkAuthAndLoad();
   }, []);
 
   const selectedArticle = articles.find(a => a.id === selectedArticleId) || null;
@@ -323,6 +357,21 @@ export function App() {
   const handleBatchResearch = (ids: number[]) => startBatchProcess(ids, 'research');
   const handleBatchGenerate = (ids: number[]) => startBatchProcess(ids, 'generate');
 
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
+        <div className="flex items-center space-x-3 text-slate-400">
+          <Loader2 className="w-6 h-6 animate-spin text-sky-400" />
+          <span className="text-sm font-medium">Verifying Justapedia authentication...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser || !authUser.logged_in) {
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900">
       
@@ -330,6 +379,8 @@ export function App() {
       <Navbar
         settings={settings}
         connection={connection}
+        currentUser={authUser.username || 'Editor'}
+        onLogout={handleLogout}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onRefresh={loadInitialData}
         isLoading={isLoading}
