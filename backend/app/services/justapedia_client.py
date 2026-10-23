@@ -210,6 +210,7 @@ class JustapediaClient:
         
         categories = [c.get("title", "") for c in page.get("categories", [])]
         templates = [t.get("title", "") for t in page.get("templates", [])]
+        is_redirect = bool("redirect" in page or wikitext.strip().lower().startswith("#redirect"))
         
         return {
             "exists": True,
@@ -220,7 +221,8 @@ class JustapediaClient:
             "user": latest_rev.get("user"),
             "wikitext": wikitext,
             "categories": categories,
-            "templates": templates
+            "templates": templates,
+            "is_redirect": is_redirect
         }
 
     async def check_exists(self, title: str) -> Tuple[bool, Optional[str]]:
@@ -325,27 +327,90 @@ class JustapediaClient:
             summary = f"[TEST] Draft for {title}: {summary}"
 
         data = None
+        verified_editor = None
 
-        # Scenario A: Authenticated user session provided (OAuth or direct user cookies)
-        if user_session:
-            auth_type = user_session.get("auth_type", "credentials")
-            sess_data = user_session.get("session_data", {})
+        if not user_session:
+            return {
+                "success": False,
+                "title": target_title,
+                "message": "Authentication required: You must be logged in with your Justapedia account to save edits.",
+                "raw_response": None
+            }
 
-            if auth_type == "oauth":
-                try:
-                    from requests_oauthlib import OAuth1Session
-                    oauth_tok = sess_data.get("oauth_token")
-                    oauth_sec = sess_data.get("oauth_token_secret")
-                    oauth = OAuth1Session(
-                        client_key=settings.OAUTH_CONSUMER_KEY,
-                        client_secret=settings.OAUTH_CONSUMER_SECRET,
-                        resource_owner_key=oauth_tok,
-                        resource_owner_secret=oauth_sec
-                    )
-                    t_resp = oauth.get(f"{self.api_url}?action=query&meta=tokens&type=csrf&format=json", headers=self.headers, timeout=20)
+        auth_type = user_session.get("auth_type", "credentials")
+        sess_data = user_session.get("session_data", {})
+        expected_username = user_session.get("username")
+
+        if auth_type == "oauth":
+            try:
+                from requests_oauthlib import OAuth1Session
+                oauth_tok = sess_data.get("oauth_token")
+                oauth_sec = sess_data.get("oauth_token_secret")
+                oauth = OAuth1Session(
+                    client_key=settings.OAUTH_CONSUMER_KEY,
+                    client_secret=settings.OAUTH_CONSUMER_SECRET,
+                    resource_owner_key=oauth_tok,
+                    resource_owner_secret=oauth_sec
+                )
+                t_resp = oauth.get(f"{self.api_url}?action=query&meta=tokens&type=csrf&format=json", headers=self.headers, timeout=20)
+                csrf_token = t_resp.json().get("query", {}).get("tokens", {}).get("csrftoken")
+                if not csrf_token:
+                    return {"success": False, "title": target_title, "message": "Failed to retrieve CSRF token via OAuth."}
+
+                payload = {
+                    "action": "edit",
+                    "title": target_title,
+                    "text": wikitext,
+                    "summary": summary,
+                    "token": csrf_token,
+                    "format": "json"
+                }
+                if is_minor: payload["minor"] = 1
+                if is_bot: payload["bot"] = 1
+                if basetimestamp and not is_sandbox: payload["basetimestamp"] = basetimestamp
+
+                resp = oauth.post(self.api_url, data=payload, headers=self.headers, timeout=25)
+                data = resp.json()
+                verified_editor = expected_username
+            except Exception as oauth_err:
+                logger.error(f"OAuth edit error: {oauth_err}")
+                return {"success": False, "title": target_title, "message": f"OAuth publish failed: {str(oauth_err)}"}
+
+        else:
+            # Direct credentials (cookies)
+            try:
+                cookies = sess_data.get("cookies", {})
+                async with httpx.AsyncClient(headers=self.headers, cookies=cookies, timeout=30.0, follow_redirects=True) as u_client:
+                    # 1. Strictly verify the current authenticated identity via MediaWiki API
+                    u_info_resp = await u_client.get(self.api_url, params={"action": "query", "meta": "userinfo", "format": "json"})
+                    u_info_resp.raise_for_status()
+                    u_info = u_info_resp.json().get("query", {}).get("userinfo", {})
+                    actual_username = u_info.get("name")
+                    is_anon = "anon" in u_info
+
+                    if is_anon or not actual_username:
+                        return {
+                            "success": False,
+                            "title": target_title,
+                            "message": "Authentication failed: Justapedia session cookies have expired. Please re-authenticate.",
+                            "raw_response": u_info
+                        }
+
+                    if expected_username and actual_username.lower() != expected_username.lower():
+                        logger.error(f"Editor identity mismatch: Expected '{expected_username}', got '{actual_username}'")
+                        return {
+                            "success": False,
+                            "title": target_title,
+                            "message": f"Authentication mismatch: MediaWiki authenticated as '{actual_username}' instead of '{expected_username}'. Please log in again.",
+                            "raw_response": u_info
+                        }
+
+                    # 2. Retrieve CSRF token for the authenticated user
+                    t_resp = await u_client.get(self.api_url, params={"action": "query", "meta": "tokens", "type": "csrf", "format": "json"})
+                    t_resp.raise_for_status()
                     csrf_token = t_resp.json().get("query", {}).get("tokens", {}).get("csrftoken")
                     if not csrf_token:
-                        return {"success": False, "title": target_title, "message": "Failed to retrieve CSRF token via OAuth."}
+                        return {"success": False, "title": target_title, "message": "Failed to retrieve CSRF token with session cookies."}
 
                     payload = {
                         "action": "edit",
@@ -359,124 +424,33 @@ class JustapediaClient:
                     if is_bot: payload["bot"] = 1
                     if basetimestamp and not is_sandbox: payload["basetimestamp"] = basetimestamp
 
-                    resp = oauth.post(self.api_url, data=payload, headers=self.headers, timeout=25)
+                    resp = await u_client.post(self.api_url, data=payload)
+                    resp.raise_for_status()
                     data = resp.json()
-                except Exception as oauth_err:
-                    logger.error(f"OAuth edit error: {oauth_err}")
-                    return {"success": False, "title": target_title, "message": f"OAuth publish failed: {str(oauth_err)}"}
-
-            else:
-                # Direct credentials (cookies)
-                try:
-                    cookies = sess_data.get("cookies", {})
-                    async with httpx.AsyncClient(headers=self.headers, cookies=cookies, timeout=30.0, follow_redirects=True) as u_client:
-                        t_resp = await u_client.get(self.api_url, params={"action": "query", "meta": "tokens", "type": "csrf", "format": "json"})
-                        t_resp.raise_for_status()
-                        csrf_token = t_resp.json().get("query", {}).get("tokens", {}).get("csrftoken")
-                        if not csrf_token:
-                            return {"success": False, "title": target_title, "message": "Failed to retrieve CSRF token with session cookies."}
-
-                        payload = {
-                            "action": "edit",
-                            "title": target_title,
-                            "text": wikitext,
-                            "summary": summary,
-                            "token": csrf_token,
-                            "format": "json"
-                        }
-                        if is_minor: payload["minor"] = 1
-                        if is_bot: payload["bot"] = 1
-                        if basetimestamp and not is_sandbox: payload["basetimestamp"] = basetimestamp
-
-                        resp = await u_client.post(self.api_url, data=payload)
-                        resp.raise_for_status()
-                        data = resp.json()
-                except Exception as cred_err:
-                    logger.error(f"Session cookies edit error: {cred_err}")
-                    return {"success": False, "title": target_title, "message": f"Session publish failed: {str(cred_err)}"}
-
-        else:
-            # Scenario B: Fallback to server-level bot credentials if present
-            if not self.logged_in_user and (settings.JUSTAPEDIA_BOT_USERNAME and settings.JUSTAPEDIA_BOT_PASSWORD):
-                logger.info("Session not authenticated. Logging in with configured bot credentials...")
-                await self.login()
-
-            if not self.logged_in_user:
-                return {
-                    "success": False,
-                    "title": target_title,
-                    "message": "Cannot publish: You must be logged in with your Justapedia account.",
-                    "raw_response": None
-                }
-
-            csrf_token = await self.get_csrf_token()
-            payload = {
-                "action": "edit",
-                "title": target_title,
-                "text": wikitext,
-                "summary": summary,
-                "token": csrf_token,
-                "format": "json"
-            }
-            if is_minor: payload["minor"] = 1
-            if is_bot: payload["bot"] = 1
-            if basetimestamp and not is_sandbox: payload["basetimestamp"] = basetimestamp
-
-            resp = await self.client.post(self.api_url, data=payload)
-            resp.raise_for_status()
-            data = resp.json()
+                    verified_editor = actual_username
+            except Exception as cred_err:
+                logger.error(f"Session cookies edit error: {cred_err}")
+                return {"success": False, "title": target_title, "message": f"Session publish failed: {str(cred_err)}"}
 
         # Check for MediaWiki error responses
         if "error" in data:
             error_code = data["error"].get("code", "unknown")
             error_info = data["error"].get("info", "Unknown API error")
             
-            # If token expired or permission error, re-login and retry once
             if error_code in ["badtoken", "notoken", "permissiondenied", "assertuserfailed", "mustbeloggedin"]:
-                logger.info(f"Received {error_code} from wiki. Re-authenticating and retrying save...")
-                login_ok, login_msg = await self.login()
-                if login_ok:
-                    csrf_token = await self.get_csrf_token(force_refresh=True)
-                    payload["token"] = csrf_token
-                    retry_resp = await self.client.post(self.api_url, data=payload)
-                    retry_resp.raise_for_status()
-                    data = retry_resp.json()
-                    if "error" in data:
-                        return {
-                            "success": False,
-                            "title": target_title,
-                            "message": f"API Error ({data['error'].get('code')}): {data['error'].get('info')}",
-                            "raw_response": data
-                        }
-                else:
-                    return {
-                        "success": False,
-                        "title": target_title,
-                        "message": f"Login re-authentication failed: {login_msg}",
-                        "raw_response": data
-                    }
+                return {
+                    "success": False,
+                    "title": target_title,
+                    "message": f"Authentication error ({error_code}): Your Justapedia login session has expired or lacks edit rights. Please re-login.",
+                    "raw_response": data
+                }
             elif error_code == "editconflict":
-                # If basetimestamp caused edit conflict, retry once without basetimestamp since user explicitly approved
-                if "basetimestamp" in payload:
-                    logger.info("Edit conflict encountered with basetimestamp. Retrying direct overwrite...")
-                    del payload["basetimestamp"]
-                    retry_resp = await self.client.post(self.api_url, data=payload)
-                    retry_resp.raise_for_status()
-                    data = retry_resp.json()
-                    if "error" in data:
-                        return {
-                            "success": False,
-                            "title": target_title,
-                            "message": f"Edit Conflict on Justapedia: {data['error'].get('info')}",
-                            "raw_response": data
-                        }
-                else:
-                    return {
-                        "success": False,
-                        "title": target_title,
-                        "message": "Edit Conflict: This article was modified on Justapedia by another editor since you loaded it.",
-                        "raw_response": data
-                    }
+                return {
+                    "success": False,
+                    "title": target_title,
+                    "message": f"Edit Conflict on Justapedia: {error_info}. Please refresh and re-examine the latest page revision.",
+                    "raw_response": data
+                }
             else:
                 return {
                     "success": False,
@@ -501,6 +475,7 @@ class JustapediaClient:
                 "revid": new_revid,
                 "url": url,
                 "is_sandbox": is_sandbox,
+                "editor": verified_editor,
                 "message": msg,
                 "raw_response": data
             }

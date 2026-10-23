@@ -38,6 +38,8 @@ export const ArticleQueue: React.FC<ArticleQueueProps> = ({
     // Once an article is saved, never display it in the list of articles needing updates
     if (savedList.includes(a.title)) return false;
     if (a.status === 'saved') return false;
+    // Filter out redirect articles so users cannot accidentally select or edit redirect pages
+    if (a.audit_flags?.includes('redirect_page') || a.original_wikitext?.trim().toLowerCase().startsWith('#redirect')) return false;
     if (hideDone && (!a.audit_flags || a.audit_flags.length === 0)) return false;
 
     const matchesSearch = a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||

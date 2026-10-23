@@ -82,11 +82,11 @@ export const ArticleStudio: React.FC<ArticleStudioProps> = ({
     const renderedElements: React.ReactNode[] = [];
     let currentParagraph: string[] = [];
 
-    // Extract Infobox if present
-    const infoboxMatch = wikitext.match(/\{\{Infobox\s+person([\s\S]*?)\}\}/i);
+    // Extract Infobox if present (any biographical infobox)
+    const infoboxMatch = wikitext.match(/\{\{Infobox\s+([A-Za-z0-9_ ]+)([\s\S]*?)\n\}\}/i);
     let infoboxParams: Record<string, string> = {};
     if (infoboxMatch) {
-      const paramLines = infoboxMatch[1].split('\n');
+      const paramLines = infoboxMatch[2].split('\n');
       paramLines.forEach(pl => {
         const parts = pl.split('=');
         if (parts.length >= 2 && parts[0].trim().startsWith('|')) {
@@ -96,6 +96,10 @@ export const ArticleStudio: React.FC<ArticleStudioProps> = ({
         }
       });
     }
+
+    // Extract Short Description
+    const shortDescMatch = wikitext.match(/\{\{short description\|([^}]+)\}\}/i);
+    const shortDescription = shortDescMatch ? shortDescMatch[1].trim() : null;
 
     const flushParagraph = (key: number) => {
       if (currentParagraph.length > 0) {
@@ -192,9 +196,15 @@ export const ArticleStudio: React.FC<ArticleStudioProps> = ({
 
     return (
       <div className="relative">
-        {/* Render Floated Infobox Card */}
+        {/* Render Floated Infobox Card with Short Description directly above it */}
         {Object.keys(infoboxParams).length > 0 && (
           <div className="float-right w-72 ml-4 mb-4 p-3.5 bg-slate-50 border border-slate-300 rounded-lg shadow-sm text-xs">
+            {shortDescription && (
+              <div className="mb-2 pb-1.5 border-b border-slate-200 text-center">
+                <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider block">Short Description</span>
+                <span className="text-xs italic text-slate-700 font-medium">{shortDescription}</span>
+              </div>
+            )}
             <div className="text-center font-bold text-sm text-slate-900 border-b border-slate-200 pb-1.5 mb-2 bg-slate-200/50 -mx-3.5 -mt-3.5 p-2 rounded-t-lg">
               {infoboxParams.name || article.title}
             </div>

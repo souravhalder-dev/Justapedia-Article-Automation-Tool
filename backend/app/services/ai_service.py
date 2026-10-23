@@ -270,10 +270,11 @@ def update_short_description(
 ) -> str:
     """
     Updates or preserves the {{short description}} template without removing it.
+    Always places the short description directly ABOVE the infobox (or at the top if no infobox).
     Follows Wikipedia and Justapedia editorial guidelines (MOS:SHORTDESC):
     - Formats biographical descriptions with life years if known (e.g. 'American actress (1949–2024)').
     - If a short description already exists, updates its descriptor and year range.
-    - If none exists, creates and prepends an updated short description at the top.
+    - If none exists, creates an updated short description.
     """
     if not wikitext:
         return ""
@@ -295,20 +296,34 @@ def update_short_description(
     elif d_y:
         years_str = f"(died {d_y})"
 
+    # Find existing short description text if present
+    base_desc = default_role or "Biographical subject"
     m_sd = re.search(r"\{\{short description\|([^}]+)\}\}", wikitext, re.IGNORECASE)
     if m_sd:
         desc = m_sd.group(1).strip()
         # Strip existing trailing year spans so we can cleanly update
-        base_desc = re.sub(r"\s*\((?:\d{4}[–-]\d{4}|born \d{4}|died \d{4}|\d{4}[–-]present)\)", "", desc).strip()
-        if not base_desc:
-            base_desc = default_role or "Biographical subject"
-        new_desc = f"{base_desc} {years_str}".strip() if years_str else base_desc
-        return re.sub(r"\{\{short description\|[^}]+\}\}", f"{{{{short description|{new_desc}}}}}", wikitext, count=1, flags=re.IGNORECASE)
+        cleaned_desc = re.sub(r"\s*\((?:\d{4}[–-]\d{4}|born \d{4}|died \d{4}|\d{4}[–-]present)\)", "", desc).strip()
+        if cleaned_desc:
+            base_desc = cleaned_desc
+
+    new_desc = f"{base_desc} {years_str}".strip() if years_str else base_desc
+    sd_tag = f"{{{{short description|{new_desc}}}}}"
+
+    # Remove all existing short description tags from wikitext
+    clean_text = re.sub(r"\{\{short description\|[^}]+\}\}\s*\n?", "", wikitext, flags=re.IGNORECASE).strip()
+
+    # Place directly above {{Infobox ...}} if present
+    m_info = re.search(r"(\{\{Infobox\b)", clean_text, re.IGNORECASE)
+    if m_info:
+        idx = m_info.start()
+        prefix = clean_text[:idx].rstrip()
+        suffix = clean_text[idx:].lstrip()
+        if prefix:
+            return f"{prefix}\n{sd_tag}\n{suffix}"
+        else:
+            return f"{sd_tag}\n{suffix}"
     else:
-        role = default_role or "Biographical subject"
-        new_desc = f"{role} {years_str}".strip() if years_str else role
-        sd_tag = f"{{{{short description|{new_desc}}}}}\n"
-        return sd_tag + wikitext.lstrip()
+        return f"{sd_tag}\n{clean_text}"
 
 
 def rewrite_article_prose(
@@ -466,7 +481,57 @@ def rewrite_article_prose(
         death_date=death_date
     )
 
+    # 6. Sanitize citations (strip any references citing Wikipedia or Wikimedia)
+    result_text = sanitize_citations(result_text)
+
     return result_text
+
+
+def is_valid_citation_url(url: Optional[str], publisher: Optional[str] = None) -> bool:
+    """
+    Validates whether a URL and publisher are suitable as an encyclopedic citation.
+    Strictly forbids citing Wikipedia, Wikidata, Wikimedia, or Justapedia as sources.
+    Only allows external, independent, reliable source URLs.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip().lower()
+    p = (publisher or "").strip().lower()
+
+    if not (u.startswith("http://") or u.startswith("https://")):
+        return False
+
+    prohibited_domains = [
+        "wikipedia.org",
+        "wikidata.org",
+        "wikimedia.org",
+        "justapedia.org",
+        "w.wiki",
+        "wikinews.org",
+        "wikiquote.org",
+        "wikisource.org",
+    ]
+    if any(domain in u for domain in prohibited_domains):
+        return False
+
+    if p in ("wikipedia", "wikimedia", "wikidata", "justapedia"):
+        return False
+
+    return True
+
+
+def sanitize_citations(wikitext: str) -> str:
+    """
+    Strips any citations or references pointing to Wikipedia, Wikidata, Wikimedia,
+    or with website=Wikipedia / publisher=Wikipedia.
+    """
+    if not wikitext:
+        return ""
+    wiki_ref_pattern = re.compile(
+        r"<ref[^>]*>[\s\S]*?(?:wikipedia\.org|wikidata\.org|wikimedia\.org|website\s*=\s*Wikipedia|publisher\s*=\s*Wikipedia|work\s*=\s*Wikipedia)[\s\S]*?<\/ref>",
+        re.IGNORECASE
+    )
+    return wiki_ref_pattern.sub("", wikitext)
 
 
 def synthesize_original_death_section(
@@ -511,7 +576,7 @@ def synthesize_original_death_section(
             u = s.get("url")
             t = s.get("title")
             p = s.get("publisher", "Web")
-            if u and t:
+            if u and t and is_valid_citation_url(u, p):
                 return f"<ref>{{{{cite web |url={u} |title={t} |website={p} |access-date=2024}}}}</ref>"
         return ""
 
@@ -595,7 +660,7 @@ def synthesize_original_career_section(
             u = s.get("url")
             t = s.get("title")
             p = s.get("publisher", "Web")
-            if u and t:
+            if u and t and is_valid_citation_url(u, p):
                 return f"<ref>{{{{cite web |url={u} |title={t} |website={p} |access-date=2024}}}}</ref>"
         return ""
 
@@ -1324,6 +1389,11 @@ CRITICAL EDITORIAL AND ETHICAL REQUIREMENTS:
      * Preserving all existing article text, tables, and sections without injecting unwanted extra sections.
 
 4. WIKIPEDIA REFERENCING GUIDELINES (WP:RS, WP:V, WP:CITE):
+   - STRICT CITATION SOURCE PROHIBITION (NEVER CITE WIKIPEDIA):
+     * NEVER cite Wikipedia as a source or use wikipedia.org URLs in <ref> tags.
+     * NEVER generate references with website=Wikipedia or publisher=Wikipedia. Wikipedia is user-edited and not a reliable source.
+     * Only cite external, independent reliable publications (e.g. newspapers, books, academic journals).
+     * If an independent reliable source is not available, leave the claim uncited rather than citing Wikipedia or fabricating a source.
    - Every newly added fact, date, cause of death, career milestone, or quote MUST be supported by an appropriate inline citation.
    - Format citations using standard MediaWiki citation templates:
      `<ref>{{{{cite news |last=... |first=... |date=... |title=... |newspaper=... |url=... |access-date=...}}}}</ref>`
@@ -1531,7 +1601,7 @@ Respond ONLY with a JSON object conforming to this schema:
                 s_url = s.get("url", "")
                 s_title = s.get("title", "")
                 s_pub = s.get("publisher", "Web")
-                if s_url and s_title and s_url not in draft:
+                if s_url and s_title and is_valid_citation_url(s_url, s_pub) and s_url not in draft:
                     citation_tags += f"<ref>{{{{cite web |url={s_url} |title={s_title} |website={s_pub} |access-date=2024}}}}</ref>"
 
             if citation_tags and "<ref" not in draft:

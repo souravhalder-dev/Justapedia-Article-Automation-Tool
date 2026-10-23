@@ -49,3 +49,9 @@ def test_analyze_few_citations():
     res = ArticleAnalyzer.analyze("Alice", wikitext, [])
     assert "no_citations" in res["flags"]
     assert "short_stub" in res["flags"]
+
+def test_analyze_redirect_page():
+    wikitext = "#REDIRECT [[Arthur Pendelton]]"
+    res = ArticleAnalyzer.analyze("Art Pendelton", wikitext, [])
+    assert "redirect_page" in res["flags"]
+    assert res.get("is_redirect") is True

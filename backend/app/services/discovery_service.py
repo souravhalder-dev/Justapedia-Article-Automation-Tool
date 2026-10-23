@@ -274,6 +274,12 @@ class DiscoveryService:
         revid = wiki_data.get("revid")
         timestamp = wiki_data.get("timestamp")
         categories = wiki_data.get("categories", [])
+        is_redirect = wiki_data.get("is_redirect", False) or (wikitext or "").strip().lower().startswith("#redirect")
+
+        # Skip redirect articles completely so they never appear in generator/queue
+        if is_redirect:
+            logger.info(f"Skipping redirect article: {title}")
+            return None
 
         # Audit and gap analysis
         audit = ArticleAnalyzer.analyze(title, wikitext, categories)

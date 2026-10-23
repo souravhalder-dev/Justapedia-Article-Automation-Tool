@@ -100,6 +100,7 @@ export interface SaveToWikiResponse {
   revid?: number;
   url?: string;
   is_sandbox: boolean;
+  editor?: string;
   message: string;
 }
 

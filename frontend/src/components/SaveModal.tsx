@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArticleJob, AppSettings, SaveToWikiResponse } from '../types';
-import { Save, AlertTriangle, CheckCircle2, ExternalLink, ShieldCheck, X } from 'lucide-react';
+import { Save, AlertTriangle, CheckCircle2, ExternalLink, ShieldCheck, X, UserCheck } from 'lucide-react';
 
 interface SaveModalProps {
   isOpen: boolean;
@@ -30,12 +30,30 @@ export const SaveModal: React.FC<SaveModalProps> = ({
     'Update biographical details, death dates, and reliable citations via Justapedia Editorial Studio'
   );
   const [isMinor, setIsMinor] = useState<boolean>(false);
-  const [isBot, setIsBot] = useState<boolean>(true);
+  const [isBot, setIsBot] = useState<boolean>(false);
   const [useSandbox, setUseSandbox] = useState<boolean>(false);
   const [saveResult, setSaveResult] = useState<SaveToWikiResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Reset modal state every time it opens or the article changes so consecutive saves never get stuck
+  useEffect(() => {
+    if (isOpen) {
+      setSaveResult(null);
+      setErrorMessage(null);
+      setEditSummary('Update biographical details, death dates, and reliable citations via Justapedia Editorial Studio');
+      setIsMinor(false);
+      setIsBot(false);
+      setUseSandbox(false);
+    }
+  }, [isOpen, article?.id]);
+
   if (!isOpen) return null;
+
+  const handleClose = () => {
+    setSaveResult(null);
+    setErrorMessage(null);
+    onClose();
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +94,7 @@ export const SaveModal: React.FC<SaveModalProps> = ({
             </h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
           >
             <X className="w-5 h-5" />
@@ -188,6 +206,13 @@ export const SaveModal: React.FC<SaveModalProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 <span>{saveResult.message}</span>
               </div>
+              {saveResult.editor && (
+                <p className="flex items-center text-slate-700">
+                  <UserCheck className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                  <span>Attributed to: </span>
+                  <span className="font-bold text-slate-900 ml-1 bg-emerald-100/80 px-1.5 py-0.5 rounded">{saveResult.editor}</span>
+                </p>
+              )}
               {saveResult.revid && (
                 <p>New Revision ID: <span className="font-mono font-bold">#{saveResult.revid}</span></p>
               )}
@@ -209,10 +234,10 @@ export const SaveModal: React.FC<SaveModalProps> = ({
           <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
             <button
               type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              onClick={handleClose}
+              className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
             >
-              {saveResult?.success ? 'Close' : 'Cancel'}
+              {saveResult?.success ? 'Done & Next' : 'Cancel'}
             </button>
 
             {!saveResult?.success && (

@@ -3,7 +3,7 @@ import json
 import secrets
 import logging
 from typing import Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 from requests_oauthlib import OAuth1Session
 from urllib.parse import parse_qs
@@ -68,7 +68,7 @@ class AuthService:
         # Cache request token secret for Step 2
         _pending_oauth_tokens[oauth_token] = {
             "oauth_token_secret": oauth_token_secret,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc)
         }
 
         authorize_url = (
@@ -128,13 +128,24 @@ class AuthService:
             except Exception as e:
                 logger.warning(f"Could not decode identify JWT: {e}")
 
-        session_token = secrets.token_hex(32)
         session_data = {
             "oauth_token": access_token,
             "oauth_token_secret": access_token_secret
         }
 
-        await self._persist_session(session_token, username, "oauth", session_data)
+        # Issue stateless signed JWT session token
+        exp_dt = datetime.now(timezone.utc) + timedelta(days=7)
+        jwt_payload = {
+            "sub": username,
+            "auth_type": "oauth",
+            "session_data": session_data,
+            "exp": int(exp_dt.timestamp()),
+            "iat": int(datetime.now(timezone.utc).timestamp()),
+            "jti": secrets.token_hex(16)
+        }
+        session_token = jwt.encode(jwt_payload, settings.JWT_SECRET, algorithm="HS256")
+
+        await self._persist_session(session_token, username, "oauth", session_data, exp_dt)
 
         return {
             "success": True,
@@ -197,10 +208,21 @@ class AuthService:
             for name, val in client.cookies.items():
                 cookie_dict[name] = val
 
-            session_token = secrets.token_hex(32)
             session_data = {"cookies": cookie_dict}
 
-            await self._persist_session(session_token, verified_username, "credentials", session_data)
+            # Issue stateless signed JWT session token (deterministic across serverless lambdas)
+            exp_dt = datetime.now(timezone.utc) + timedelta(days=7)
+            jwt_payload = {
+                "sub": verified_username,
+                "auth_type": "credentials",
+                "session_data": session_data,
+                "exp": int(exp_dt.timestamp()),
+                "iat": int(datetime.now(timezone.utc).timestamp()),
+                "jti": secrets.token_hex(16)
+            }
+            session_token = jwt.encode(jwt_payload, settings.JWT_SECRET, algorithm="HS256")
+
+            await self._persist_session(session_token, verified_username, "credentials", session_data, exp_dt)
 
             return {
                 "success": True,
@@ -217,10 +239,12 @@ class AuthService:
         session_token: str,
         username: str,
         auth_type: str,
-        session_data: Dict[str, Any]
+        session_data: Dict[str, Any],
+        expires_at: Optional[datetime] = None
     ):
         """Persist user session in database and in-memory cache."""
-        expires_at = datetime.utcnow() + timedelta(days=7)
+        if expires_at is None:
+            expires_at = datetime.now(timezone.utc) + timedelta(days=7)
         data_json = json.dumps(session_data)
 
         _active_sessions_cache[session_token] = {
@@ -250,21 +274,44 @@ class AuthService:
         if not session_token:
             return None
 
-        # Check memory cache first
+        # 1. Primary: Verify and decode stateless signed JWT
+        try:
+            payload = jwt.decode(session_token, settings.JWT_SECRET, algorithms=["HS256"])
+            exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+            if exp > datetime.now(timezone.utc):
+                return {
+                    "session_token": session_token,
+                    "username": payload["sub"],
+                    "auth_type": payload.get("auth_type", "credentials"),
+                    "session_data": payload.get("session_data", {}),
+                    "expires_at": exp
+                }
+        except Exception:
+            pass
+
+        # 2. Check memory cache fallback
         if session_token in _active_sessions_cache:
             sess = _active_sessions_cache[session_token]
-            if sess.get("expires_at") and sess["expires_at"] > datetime.utcnow():
-                return sess
+            exp_time = sess.get("expires_at")
+            if exp_time:
+                if exp_time.tzinfo is None:
+                    exp_time = exp_time.replace(tzinfo=timezone.utc)
+                if exp_time > datetime.now(timezone.utc):
+                    return sess
 
-        # Fallback to database
+        # 3. Fallback to database
         try:
             async with AsyncSessionLocal() as db:
                 stmt = select(UserSession).where(UserSession.session_token == session_token)
                 res = await db.execute(stmt)
                 user_sess = res.scalar_one_or_none()
                 if user_sess:
-                    if user_sess.expires_at and user_sess.expires_at < datetime.utcnow():
-                        return None
+                    exp_time = user_sess.expires_at
+                    if exp_time:
+                        if exp_time.tzinfo is None:
+                            exp_time = exp_time.replace(tzinfo=timezone.utc)
+                        if exp_time < datetime.now(timezone.utc):
+                            return None
                     sess_data = json.loads(user_sess.session_data or "{}")
                     sess_dict = {
                         "session_token": user_sess.session_token,

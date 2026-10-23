@@ -30,6 +30,28 @@ class ResearchPipeline:
             "Accept-Language": "en-US,en;q=0.9",
         }
 
+    @staticmethod
+    def is_valid_citation_source(src: Dict[str, Any]) -> bool:
+        """
+        Validates that a source is an independent, reliable external publication.
+        Rejects Wikipedia, Wikidata, Wikimedia, and internal/placeholder URLs.
+        """
+        if not src or not isinstance(src, dict):
+            return False
+        url = (src.get("url") or "").strip().lower()
+        pub = (src.get("publisher") or "").strip().lower()
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return False
+        prohibited = [
+            "wikipedia.org", "wikidata.org", "wikimedia.org", "justapedia.org",
+            "w.wiki", "wikinews.org", "wikiquote.org", "wikisource.org"
+        ]
+        if any(p in url for p in prohibited):
+            return False
+        if pub in ("wikipedia", "wikimedia", "wikidata", "justapedia"):
+            return False
+        return True
+
     async def research_subject(self, title: str, is_deceased_mode: bool = True) -> Dict[str, Any]:
         """
         Executes parallel research queries across Wikipedia, Wikidata, and reliable web news.
@@ -37,14 +59,14 @@ class ResearchPipeline:
         async with httpx.AsyncClient(headers=self.headers, timeout=25.0, follow_redirects=True) as client:
             sources: List[Dict[str, Any]] = []
 
-            # 1. Fetch full Wikipedia article content and specific post-death sections
+            # 1. Fetch full Wikipedia article content and specific post-death sections (for context only)
             wiki_full = await self._fetch_wikipedia_full_content(client, title)
-            if wiki_full.get("lead_source"):
-                sources.append(wiki_full["lead_source"])
             
-            # Incorporate verified references from Wikipedia's death and legacy coverage
+            # Incorporate verified references from Wikipedia's citations (must be external, not Wikipedia itself)
             for ref_src in wiki_full.get("extracted_references", []):
-                sources.append(ref_src)
+                if self.is_valid_citation_source(ref_src):
+                    if not any(s.get("url") == ref_src.get("url") for s in sources):
+                        sources.append(ref_src)
 
             # 2. Query Wikidata API for confirmed structured dates and attributes
             wikidata = await self._fetch_wikidata(client, title)
@@ -60,11 +82,10 @@ class ResearchPipeline:
 
             for q in search_queries:
                 web_res = await self._search_duckduckgo(client, q)
-                if not web_res:
-                    web_res = await self._search_wikipedia_api(client, q)
                 for w in web_res:
-                    if not any(s.get("url") == w.get("url") for s in sources):
-                        sources.append(w)
+                    if self.is_valid_citation_source(w):
+                        if not any(s.get("url") == w.get("url") for s in sources):
+                            sources.append(w)
 
             return {
                 "subject": title,
@@ -108,17 +129,6 @@ class ResearchPipeline:
                     
                     result["lead_summary"] = extract
                     result["full_text"] = full_wikitext
-                    wiki_url = f"https://en.wikipedia.org/wiki/{quote_plus(wiki_title.replace(' ', '_'))}"
-                    
-                    result["lead_source"] = {
-                        "url": wiki_url,
-                        "title": f"{wiki_title} - Biographical Overview",
-                        "publisher": "Wikipedia",
-                        "publish_date": "Current",
-                        "snippet": extract[:1200],
-                        "reliability_score": 92,
-                        "is_verified": True
-                    }
 
                     # Extract Wikipedia infobox
                     result["wikipedia_infobox"] = self._extract_wikipedia_infobox(full_wikitext)

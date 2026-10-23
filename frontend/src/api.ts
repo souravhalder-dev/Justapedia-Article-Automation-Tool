@@ -12,6 +12,11 @@ function getAuthHeader(): Record<string, string> {
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
+  if (res.status === 401) {
+    localStorage.removeItem('justapedia_auth_token');
+    const errorData = await res.json().catch(() => ({ detail: 'Authentication session expired. Please log in again.' }));
+    throw new Error(errorData.detail || 'Authentication required. Please log in again.');
+  }
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(errorData.detail || `Request failed with status ${res.status}`);

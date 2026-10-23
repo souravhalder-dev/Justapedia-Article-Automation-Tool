@@ -9,6 +9,8 @@ from app.services.ai_service import (
     format_american_location,
     rewrite_article_prose,
     synthesize_original_death_section,
+    is_valid_citation_url,
+    sanitize_citations,
     ai_service
 )
 
@@ -213,6 +215,51 @@ def test_update_short_description_preserves_and_updates():
     raw_3 = "{{Infobox person\n}}"
     up_3 = update_short_description(raw_3, "Jane", "1950-01-01", "2023-12-01", default_role="American novelist")
     assert "{{short description|American novelist (1950–2023)}}" in up_3
+
+def test_update_short_description_placement_always_above_infobox():
+    # Even if short description was previously placed below the infobox or in the body,
+    # it must be repositioned directly above the infobox.
+    wikitext_with_misplaced_sd = (
+        "{{Infobox person\n"
+        "| name = Arthur Pendelton\n"
+        "}}\n"
+        "'''Arthur Pendelton''' was an author.\n"
+        "{{short description|American author}}\n"
+        "== Career ==\n"
+        "He wrote novels.\n"
+    )
+    result = update_short_description(
+        wikitext=wikitext_with_misplaced_sd,
+        title="Arthur Pendelton",
+        birth_date="1940-01-01",
+        death_date="2024-01-01"
+    )
+    sd_idx = result.index("{{short description|American author (1940–2024)}}")
+    info_idx = result.index("{{Infobox person")
+    # Short description must appear directly before the infobox
+    assert sd_idx < info_idx
+    # Must not appear twice or below the infobox
+    assert result.count("{{short description") == 1
+
+def test_wikipedia_url_citations_rejected():
+    # 1. is_valid_citation_url must reject Wikipedia URLs
+    assert is_valid_citation_url("https://en.wikipedia.org/wiki/Ay%C5%9Feg%C3%BCl_Abadan", "Wikipedia") is False
+    assert is_valid_citation_url("https://wikipedia.org/wiki/Subject", "Web") is False
+    assert is_valid_citation_url("https://wikidata.org/wiki/Q123", "Wikidata") is False
+    assert is_valid_citation_url("https://justapedia.org/wiki/Subject", "Justapedia") is False
+    # Valid reliable sources must be accepted
+    assert is_valid_citation_url("https://www.nytimes.com/2024/07/11/obituaries/shelley-duvall-dead.html", "The New York Times") is True
+    assert is_valid_citation_url("https://variety.com/2024/film/news/shelley-duvall-dead-1236067093/", "Variety") is True
+
+    # 2. sanitize_citations must strip Wikipedia citations from wikitext
+    wikitext_with_wiki_ref = (
+        "'''Ayşegül Abadan''' was a Turkish pianist.<ref>{{cite web |url=https://en.wikipedia.org/wiki/Ay%C5%9Feg%C3%BCl_Abadan |title=Overview |website=Wikipedia |access-date=2024}}</ref> "
+        "She performed widely.<ref>{{cite web |url=https://example.com/news |title=Concert |website=News |access-date=2024}}</ref>"
+    )
+    sanitized = sanitize_citations(wikitext_with_wiki_ref)
+    assert "https://en.wikipedia.org" not in sanitized
+    assert "website=Wikipedia" not in sanitized
+    assert "https://example.com/news" in sanitized
 
 def test_citations_placed_before_content():
     sources = [

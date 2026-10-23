@@ -58,6 +58,17 @@ class ArticleAnalyzer:
                 "summary": "Article does not exist on Justapedia. Ready for complete creation."
             }
 
+        # Check if page is a redirect
+        if (wikitext or "").strip().lower().startswith("#redirect"):
+            return {
+                "is_biography": False,
+                "is_deceased": False,
+                "is_redirect": True,
+                "priority": "low",
+                "flags": ["redirect_page"],
+                "summary": "Redirect page. Excluded from editorial queue."
+            }
+
         # Parse wikitext using mwparserfromhell
         try:
             parsed = mwparserfromhell.parse(wikitext)

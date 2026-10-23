@@ -70,7 +70,7 @@ class SaveToWikiRequest(BaseModel):
     wikitext: str
     edit_summary: str = "Update biographical details and citations via Justapedia Editorial Assistant"
     is_minor: bool = False
-    is_bot: bool = True
+    is_bot: bool = False
     use_sandbox: Optional[bool] = None  # None uses system default setting
 
 class SaveToWikiResponse(BaseModel):
@@ -79,6 +79,7 @@ class SaveToWikiResponse(BaseModel):
     revid: Optional[int] = None
     url: Optional[str] = None
     is_sandbox: bool = False
+    editor: Optional[str] = None
     message: str
     raw_response: Optional[Dict[str, Any]] = None
 

@@ -32,6 +32,7 @@ export function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
+  const [saveModalArticle, setSaveModalArticle] = useState<ArticleJob | null>(null);
   const [batchProgress, setBatchProgress] = useState<BatchProgressState | null>(null);
   const batchCancelRef = useRef<boolean>(false);
 
@@ -204,7 +205,13 @@ export function App() {
         return next;
       });
     } catch (err: any) {
-      alert(`Research failed: ${err.message}`);
+      if (err.message && (err.message.includes('401') || err.message.toLowerCase().includes('session expired') || err.message.toLowerCase().includes('authentication required'))) {
+        setAuthUser(null);
+        localStorage.removeItem('justapedia_auth_token');
+        alert("Your Justapedia session has expired. Please sign in again.");
+      } else {
+        alert(`Research failed: ${err.message}`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -221,7 +228,13 @@ export function App() {
         return next;
       });
     } catch (err: any) {
-      alert(`Draft generation failed: ${err.message}`);
+      if (err.message && (err.message.includes('401') || err.message.toLowerCase().includes('session expired') || err.message.toLowerCase().includes('authentication required'))) {
+        setAuthUser(null);
+        localStorage.removeItem('justapedia_auth_token');
+        alert("Your Justapedia session has expired. Please sign in again.");
+      } else {
+        alert(`Draft generation failed: ${err.message}`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -238,7 +251,13 @@ export function App() {
         return next;
       });
     } catch (err: any) {
-      alert(`Failed to update draft: ${err.message}`);
+      if (err.message && (err.message.includes('401') || err.message.toLowerCase().includes('session expired') || err.message.toLowerCase().includes('authentication required'))) {
+        setAuthUser(null);
+        localStorage.removeItem('justapedia_auth_token');
+        alert("Your Justapedia session has expired. Please sign in again.");
+      } else {
+        alert(`Failed to update draft: ${err.message}`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -252,24 +271,24 @@ export function App() {
     is_bot?: boolean;
     use_sandbox?: boolean;
   }): Promise<SaveToWikiResponse> => {
-    if (!selectedArticleId) throw new Error("No article selected");
+    const targetArticle = saveModalArticle || selectedArticle;
+    if (!targetArticle) throw new Error("No article selected");
     setIsLoading(true);
     try {
-      const art = articles.find(a => a.id === selectedArticleId);
-      const res = await api.saveToJustapedia(selectedArticleId, options, art?.title);
+      const res = await api.saveToJustapedia(targetArticle.id, options, targetArticle.title);
       
       if (res.success) {
         // Once successfully updated and saved, record in persistent storage so it is permanently excluded
         try {
           const savedList: string[] = JSON.parse(localStorage.getItem('justapedia_saved_titles') || '[]');
-          if (art?.title && !savedList.includes(art.title)) {
-            savedList.push(art.title);
+          if (targetArticle.title && !savedList.includes(targetArticle.title)) {
+            savedList.push(targetArticle.title);
             localStorage.setItem('justapedia_saved_titles', JSON.stringify(savedList));
           }
         } catch {}
 
-        // Remove from current queue
-        const remaining = articles.filter(a => a.id !== selectedArticleId);
+        // Remove from current queue and advance to next article seamlessly
+        const remaining = articles.filter(a => a.id !== targetArticle.id);
         setArticles(remaining);
         localStorage.setItem('justapedia_queue', JSON.stringify(remaining));
         if (remaining.length > 0) {
@@ -278,9 +297,16 @@ export function App() {
           setSelectedArticleId(null);
         }
       } else {
-        await refreshArticle(selectedArticleId);
+        await refreshArticle(targetArticle.id);
       }
       return res;
+    } catch (err: any) {
+      if (err.message && (err.message.includes('401') || err.message.toLowerCase().includes('session expired') || err.message.toLowerCase().includes('authentication required'))) {
+        setAuthUser(null);
+        localStorage.removeItem('justapedia_auth_token');
+        throw new Error("Your Justapedia session has expired. Please sign in again.");
+      }
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -440,7 +466,12 @@ export function App() {
               onResearch={handleResearch}
               onGenerate={handleGenerate}
               onUpdateDraft={handleUpdateDraft}
-              onOpenSaveModal={() => setIsSaveModalOpen(true)}
+              onOpenSaveModal={() => {
+                if (selectedArticle) {
+                  setSaveModalArticle(selectedArticle);
+                  setIsSaveModalOpen(true);
+                }
+              }}
               onSkip={handleSkip}
               isLoading={isLoading}
             />
@@ -451,11 +482,14 @@ export function App() {
       </main>
 
       {/* Save to Justapedia Modal Dialog */}
-      {selectedArticle && (
+      {(saveModalArticle || selectedArticle) && (
         <SaveModal
           isOpen={isSaveModalOpen}
-          onClose={() => setIsSaveModalOpen(false)}
-          article={selectedArticle}
+          onClose={() => {
+            setIsSaveModalOpen(false);
+            setSaveModalArticle(null);
+          }}
+          article={saveModalArticle || selectedArticle!}
           settings={settings}
           onConfirmSave={handleConfirmSave}
           isLoading={isLoading}

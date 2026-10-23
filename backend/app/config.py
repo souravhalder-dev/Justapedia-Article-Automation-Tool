@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     OAUTH_CONSUMER_KEY: str = "4ed93435dc4f6ca892173251eed1c644"
     OAUTH_CONSUMER_SECRET: str = "48faa3a54d28680a66104aa5c94df471a857b200"
     OAUTH_CALLBACK_URL: str = "oob"
+    JWT_SECRET: str = os.environ.get("JWT_SECRET", "48faa3a54d28680a66104aa5c94df471a857b200")
     
     # Safe Test Mode: If True, saves are directed to Justapedia:Sandbox instead of live article
     SAFE_TEST_MODE: bool = False

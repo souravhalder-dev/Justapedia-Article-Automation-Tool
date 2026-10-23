@@ -52,7 +52,14 @@ async def list_articles(
     stmt = stmt.offset(offset).limit(limit)
     res = await db.execute(stmt)
     jobs = res.scalars().all()
-    return [job_to_response(j) for j in jobs]
+    # Exclude redirect articles so users cannot accidentally select or edit redirect pages
+    valid_jobs = []
+    for j in jobs:
+        flags = json.loads(j.audit_flags or "[]")
+        if "redirect_page" in flags or (j.original_wikitext or "").strip().lower().startswith("#redirect"):
+            continue
+        valid_jobs.append(j)
+    return [job_to_response(j) for j in valid_jobs]
 
 async def get_or_restore_job(
     db: AsyncSession,
@@ -296,6 +303,12 @@ async def save_to_justapedia(
         session_token = authorization.split("Bearer ", 1)[1].strip()
     user_session = await auth_service.get_session(session_token)
 
+    if not user_session:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required: You must be logged in to your Justapedia account to save edits. Please log in."
+        )
+
     target_title = req.custom_title or job.title
     content_to_save = req.wikitext or job.user_edited_draft or job.generated_draft
     
@@ -329,6 +342,7 @@ async def save_to_justapedia(
                 revid=save_result.get("revid"),
                 url=save_result.get("url"),
                 is_sandbox=save_result.get("is_sandbox", False),
+                editor=save_result.get("editor"),
                 message=save_result.get("message", "Article saved successfully."),
                 raw_response=save_result.get("raw_response")
             )
